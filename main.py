@@ -28,6 +28,22 @@ CONFIG_FILE = "config.json"
 with open(CONFIG_FILE) as f:
     config = json.load(f)
 
+@app.route('/tally', methods=['POST'])
+def receive_tally():
+    data = request.json
+    timestamp = int(time.time())
+    filename = f"user_config_{timestamp}.json"
+
+    try:
+        with open(filename, "w") as f:
+            json.dump(data, f, indent=4)
+        print(f"[TALLY] Config saved to {filename}")
+        return "Received", 200
+    except Exception as e:
+        print(f"[TALLY ERROR] {e}")
+        return "Error", 500
+
+
 KEYWORDS    = [kw.lower() for kw in config.get("keywords", [])]
 MAX_RESULTS = config.get("max_results", 50)
 RESUME_PATH = config.get("resume_path", "resume.pdf")
