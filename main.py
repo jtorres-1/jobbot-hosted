@@ -117,16 +117,9 @@ def load_applied_urls():
         return {row[3] for row in reader if len(row) >= 4}
 
 def log_application(job):
-    ts  = datetime.datetime.utcnow().isoformat()
-    row = [ts, job["title"], job["company"], job["url"]]
+    ts = datetime.datetime.utcnow().isoformat()
 
-    # 1) Append CSV
-    with open(CSV_PATH, "a", newline="") as f:
-        csv.writer(f).writerow(row)
-    print(f"[CSV LOG] {','.join(row)}", flush=True)
-    print(f"[LOG] Applied → {job['url']}", flush=True)
-
-    # 2) Airtable record
+    # Airtable record only
     try:
         rec = airtable.create({
             "Time_stamp": ts,
@@ -135,22 +128,10 @@ def log_application(job):
             "URL":        job["url"]
         })
         print(f"[AIRTABLE ✅] Logged as {rec['id']}", flush=True)
+        print(f"[LOG] Applied → {job['url']}", flush=True)
     except Exception as e:
         print(f"[AIRTABLE ERROR] {e}", flush=True)
 
-def location_allowed(text):
-    raw = config.get("location_filter", "")
-    if not raw.strip():
-        return True  # No filter = allow everything
-
-    locs = [loc.strip().lower() for loc in raw.split(",") if loc.strip()]
-    text = text.lower()
-
-    for loc in locs:
-        if loc in text:
-            return True
-
-    return False
 
 
 
