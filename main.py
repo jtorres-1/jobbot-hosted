@@ -115,11 +115,12 @@ def log_application(job):
 
     try:
         rec = airtable.create({
-            "Time_stamp": ts,
-            "Title":      job["title"],
-            "Company":    job["company"],
-            "URL":        job["url"]
-        })
+    "Date Applied": ts,
+    "Job Title": job["title"],
+    "Company": job["company"],
+    "URL": job["url"]
+})
+
         print(f"[AIRTABLE ✅] Logged as {rec['id']}", flush=True)
         print(f"[LOG] Applied → {job['url']}", flush=True)
     except Exception as e:
