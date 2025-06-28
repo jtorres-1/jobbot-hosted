@@ -31,17 +31,35 @@ with open(CONFIG_FILE) as f:
 @app.route('/tally', methods=['POST'])
 def receive_tally():
     data = request.json
-    timestamp = int(time.time())
-    filename = f"user_config_{timestamp}.json"
+    print("[TALLY] Webhook hit")
 
+    # Extract values from Tally submission
     try:
-        with open(filename, "w") as f:
-            json.dump(data, f, indent=4)
-        print(f"[TALLY] Config saved to {filename}")
-        return "Received", 200
+        answers = {a['key']: a['value'] for a in data.get("answers", [])}
+
+        config = {
+            "keywords": answers.get("keywords", "").split(","),
+            "resume_path": "resume.pdf",
+            "user_data": {
+                "email": answers.get("email", ""),
+                "location": answers.get("location", ""),
+                "job_type": answers.get("job_type", "")
+            }
+        }
+
+        # Save config
+        with open("config.json", "w") as f:
+            json.dump(config, f, indent=2)
+        print("[TALLY] Config updated.")
+
+        # Start JobBot in a thread
+        threading.Thread(target=lambda: os.system("python3 apply.py")).start()
+        return "Success", 200
+
     except Exception as e:
-        print(f"[TALLY ERROR] {e}")
+        print("[TALLY ERROR]", str(e))
         return "Error", 500
+
 
 @app.route('/tally', methods=['POST'])
 def handle_tally():
