@@ -1,34 +1,34 @@
 FROM python:3.10-slim
 
-# Install system dependencies + Chrome + Chromedriver
+# Install Chromium and required packages
 RUN apt-get update && apt-get install -y \
-    wget \
-    unzip \
-    gnupg \
-    curl \
-    ca-certificates \
-    fonts-liberation \
-    libappindicator3-1 \
-    libasound2 \
-    libnss3 \
-    libxss1 \
-    libxtst6 \
-    xdg-utils \
     chromium \
     chromium-driver \
-    && rm -rf /var/lib/apt/lists/*
+    libglib2.0-0 \
+    libnss3 \
+    libgconf-2-4 \
+    libfontconfig1 \
+    libxss1 \
+    libappindicator1 \
+    libindicator7 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libgtk-3-0 \
+    fonts-liberation \
+    xdg-utils \
+    wget \
+    unzip && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Set display environment for Selenium
+# Set environment variable for Chromium
 ENV CHROME_BIN=/usr/bin/chromium
-ENV PATH="${PATH}:/usr/lib/chromium"
 
-# Install Python packages
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Add your bot code
+# Copy files
 COPY . /app
 WORKDIR /app
 
-# Run the bot
-CMD ["python3", "main.py"]
+# Install Python deps
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Run the app
+CMD ["python", "main.py"]
