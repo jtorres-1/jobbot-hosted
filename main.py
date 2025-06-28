@@ -11,6 +11,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from pyairtable import Table   # new Airtable client
+from datetime import datetime
 
 print("[DEBUG] AIRTABLE_TOKEN =", os.getenv("AIRTABLE_TOKEN"))
 print("[DEBUG] AIRTABLE_BASE_ID =", os.getenv("AIRTABLE_BASE_ID"))
@@ -90,7 +91,20 @@ if AIRTABLE_TOKEN and AIRTABLE_BASE_ID and AIRTABLE_TABLE_NAME:
 else:
     airtable = None
     print("[ERROR] Missing Airtable ENV vars")
+airtable = Table(AIRTABLE_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
 
+def log_to_airtable(job_title, company, location, url):
+    try:
+        airtable.create({
+            "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Job Title": job_title,
+            "Company": company,
+            "Location": location,
+            "Job URL": url
+        })
+        print(f"[LOG ✅] Airtable entry created → {job_title} at {company}")
+    except Exception as e:
+        print(f"[LOG ❌] Airtable logging failed: {e}")
 
 def load_applied_urls():
     if not os.path.exists(CSV_PATH):
