@@ -275,10 +275,13 @@ def get_jobs():
 def apply_to_job(job):
     print(f"[AUTO] Applying → {job['url']}", flush=True)
     opts = Options()
+    opts.binary_location = "/usr/bin/chromium"  # <- required on Railway
     opts.add_argument("--headless")
+    opts.add_argument("--disable-gpu")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     driver = webdriver.Chrome(options=opts)
+
     try:
         driver.get(job["url"])
         time.sleep(4)
