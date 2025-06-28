@@ -47,6 +47,17 @@ def receive_tally():
             }
         }
 
+        resume_url = data.get("resume_url")  # name this based on your Tally field
+
+        if resume_url:
+           response = requests.get(resume_url)
+           with open("resume.pdf", "wb") as f:
+            f.write(response.content)
+           print("[TALLY] Resume downloaded from form")
+       else:
+           print("[TALLY] No resume URL provided, using default")
+
+
         # Save config
         with open("config.json", "w") as f:
             json.dump(config, f, indent=2)
