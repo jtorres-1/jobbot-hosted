@@ -287,8 +287,10 @@ def apply_to_job(job):
         print("[AUTO] Success", flush=True)
     except Exception as e:
         print(f"[AUTO ERROR] {e}", flush=True)
-    finally:
+        finally:
         driver.quit()
+        log_application(job)  # <- 🔥 add this here to force logging to Airtable
+
 
 def bot_cycle():
     applied = load_applied_urls()
