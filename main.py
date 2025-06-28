@@ -109,6 +109,7 @@ def load_applied_urls():
         return {row[3] for row in reader if len(row) >= 4}
 
 def log_application(job):
+    print("[DEBUG] log_application() was called", flush=True)  # << ADD THIS
     ts = datetime.utcnow().isoformat()
 
     if airtable is None:
@@ -134,8 +135,10 @@ def log_application(job):
 
         print(f"[AIRTABLE ✅] Logged as {rec['id']}", flush=True)
         print(f"[LOG] Applied → {job['url']}", flush=True)
+
     except Exception as e:
         print(f"[AIRTABLE ERROR] {e}", flush=True)
+
 
 
 
