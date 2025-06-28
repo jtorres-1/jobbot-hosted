@@ -38,7 +38,12 @@ CSV_PATH    = "applied_jobs.csv"
 AIRTABLE_TOKEN      = os.getenv("AIRTABLE_TOKEN")
 AIRTABLE_BASE_ID    = os.getenv("AIRTABLE_BASE_ID")
 AIRTABLE_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME")
-airtable = Table(AIRTABLE_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
+if AIRTABLE_TOKEN and AIRTABLE_BASE_ID and AIRTABLE_TABLE_NAME:
+    airtable = Table(AIRTABLE_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
+else:
+    airtable = None
+    print("[ERROR] Missing Airtable ENV vars")
+
 
 def load_applied_urls():
     if not os.path.exists(CSV_PATH):
