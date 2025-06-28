@@ -43,6 +43,12 @@ def receive_tally():
         print(f"[TALLY ERROR] {e}")
         return "Error", 500
 
+@app.route('/tally', methods=['POST'])
+def handle_tally():
+    print("[TALLY] Webhook hit")
+    ...
+
+
 
 KEYWORDS    = [kw.lower() for kw in config.get("keywords", [])]
 MAX_RESULTS = config.get("max_results", 50)
