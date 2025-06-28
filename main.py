@@ -87,10 +87,11 @@ AIRTABLE_TOKEN      = os.getenv("AIRTABLE_TOKEN")
 AIRTABLE_BASE_ID    = os.getenv("AIRTABLE_BASE_ID")
 AIRTABLE_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME")
 if AIRTABLE_TOKEN and AIRTABLE_BASE_ID and AIRTABLE_TABLE_NAME:
+    print("[AIRTABLE ✅] ENV vars loaded successfully", flush=True)
     airtable = Table(AIRTABLE_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
 else:
+    print("[AIRTABLE ❌] Missing one or more ENV vars", flush=True)
     airtable = None
-    print("[ERROR] Missing Airtable ENV vars")
 
 
 
