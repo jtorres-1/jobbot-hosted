@@ -65,7 +65,8 @@ else:
         print("[TALLY] Config updated.")
 
         # Start JobBot in a thread
-        threading.Thread(target=lambda: os.system("python3 apply.py")).start()
+        threading.Thread(target=bot_cycle).start()
+
         return "Success", 200
 
     except Exception as e:
