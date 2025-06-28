@@ -91,20 +91,8 @@ if AIRTABLE_TOKEN and AIRTABLE_BASE_ID and AIRTABLE_TABLE_NAME:
 else:
     airtable = None
     print("[ERROR] Missing Airtable ENV vars")
-airtable = Table(AIRTABLE_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
 
-def log_to_airtable(job_title, company, location, url):
-    try:
-        airtable.create({
-            "Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Job Title": job_title,
-            "Company": company,
-            "Location": location,
-            "Job URL": url
-        })
-        print(f"[LOG ✅] Airtable entry created → {job_title} at {company}")
-    except Exception as e:
-        print(f"[LOG ❌] Airtable logging failed: {e}")
+
 
 def load_applied_urls():
     if not os.path.exists(CSV_PATH):
@@ -119,7 +107,10 @@ def load_applied_urls():
 def log_application(job):
     ts = datetime.datetime.utcnow().isoformat()
 
-    # Airtable record only
+    if airtable is None:
+        print("[ERROR] Airtable client not initialized.")
+        return
+
     try:
         rec = airtable.create({
             "Time_stamp": ts,
@@ -131,6 +122,8 @@ def log_application(job):
         print(f"[LOG] Applied → {job['url']}", flush=True)
     except Exception as e:
         print(f"[AIRTABLE ERROR] {e}", flush=True)
+
+
 
 
 
