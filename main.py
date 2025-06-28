@@ -12,6 +12,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
 from pyairtable import Table   # new Airtable client
 from datetime import datetime
+from flask import Flask, request
+
 
 print("[DEBUG] AIRTABLE_TOKEN =", os.getenv("AIRTABLE_TOKEN"))
 print("[DEBUG] AIRTABLE_BASE_ID =", os.getenv("AIRTABLE_BASE_ID"))
@@ -51,12 +53,13 @@ def receive_tally():
         resume_url = data.get("resume_url")  # name this based on your Tally field
 
         if resume_url and "localhost" not in resume_url:
-    response = requests.get(resume_url, timeout=20)
-    with open("resume.pdf", "wb") as f:
-        f.write(response.content)
-    print("[TALLY] Resume downloaded from form")
-else:
-    print("[TALLY] Invalid or missing resume URL — using default")
+            response = requests.get(resume_url, timeout=20)
+            with open("resume.pdf", "wb") as f:
+                f.write(response.content)
+            print("[TALLY] Resume downloaded from form")
+        else:
+            print("[TALLY] Invalid or missing resume URL — using default")
+
 
 
 
@@ -108,25 +111,32 @@ def load_applied_urls():
 def log_application(job):
     ts = datetime.utcnow().isoformat()
 
-
     if airtable is None:
         print("[ERROR] Airtable client not initialized.")
         return
 
     try:
-        rec = airtable.create({
-    "Date Applied": ts,
-    "Job Title": job["title"],
-    "Company": job["company"],
-    "URL": job["url"],
-    "Client Email": USER_DATA.get("email", "unknown@example.com")
-})
+        print("[DEBUG] Logging to Airtable with:", {
+            "Date Applied": ts,
+            "Job Title": job["title"],
+            "Company": job["company"],
+            "URL": job["url"],
+            "Client Email": USER_DATA.get("email", "unknown@example.com")
+        }, flush=True)
 
+        rec = airtable.create({
+            "Date Applied": ts,
+            "Job Title": job["title"],
+            "Company": job["company"],
+            "URL": job["url"],
+            "Client Email": USER_DATA.get("email", "unknown@example.com")
+        })
 
         print(f"[AIRTABLE ✅] Logged as {rec['id']}", flush=True)
         print(f"[LOG] Applied → {job['url']}", flush=True)
     except Exception as e:
         print(f"[AIRTABLE ERROR] {e}", flush=True)
+
 
 
 
