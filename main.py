@@ -118,8 +118,10 @@ def log_application(job):
     "Date Applied": ts,
     "Job Title": job["title"],
     "Company": job["company"],
-    "URL": job["url"]
+    "URL": job["url"],
+    "Client Email": USER_DATA.get("email", "unknown@example.com")
 })
+
 
         print(f"[AIRTABLE ✅] Logged as {rec['id']}", flush=True)
         print(f"[LOG] Applied → {job['url']}", flush=True)
