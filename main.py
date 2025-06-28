@@ -112,7 +112,6 @@ def load_applied_urls():
 def log_application(job):
     print("[DEBUG] log_application() was called", flush=True)
 
-    # 🔥 Load the latest config dynamically
     try:
         with open("config.json") as f:
             runtime_config = json.load(f)
@@ -123,32 +122,37 @@ def log_application(job):
     user_data = runtime_config.get("user_data", {})
     ts = datetime.utcnow().isoformat()
 
-    if airtable is None:
-        print("[ERROR] Airtable client not initialized.")
+    # 🔥 Fetch env vars dynamically just in case
+    token = os.getenv("AIRTABLE_TOKEN")
+    base_id = os.getenv("AIRTABLE_BASE_ID")
+    table_name = os.getenv("AIRTABLE_TABLE_NAME")
+
+    if not all([token, base_id, table_name]):
+        print("[AIRTABLE ERROR] One or more env vars missing at runtime.", flush=True)
+        print(f"  AIRTABLE_TOKEN = {token}")
+        print(f"  AIRTABLE_BASE_ID = {base_id}")
+        print(f"  AIRTABLE_TABLE_NAME = {table_name}")
         return
 
     try:
-        print("[DEBUG] Logging to Airtable with:", {
+        airtable = Table(token, base_id, table_name)
+
+        payload = {
             "Date Applied": ts,
             "Job Title": job["title"],
             "Company": job["company"],
             "URL": job["url"],
             "Client Email": user_data.get("email", "unknown@example.com")
-        }, flush=True)
+        }
 
-        rec = airtable.create({
-            "Date Applied": ts,
-            "Job Title": job["title"],
-            "Company": job["company"],
-            "URL": job["url"],
-            "Client Email": user_data.get("email", "unknown@example.com")
-        })
+        print("[DEBUG] Logging to Airtable with:", payload, flush=True)
 
+        rec = airtable.create(payload)
         print(f"[AIRTABLE ✅] Logged as {rec['id']}", flush=True)
-        print(f"[LOG] Applied → {job['url']}", flush=True)
 
     except Exception as e:
         print(f"[AIRTABLE ERROR] {e}", flush=True)
+
 
 
 
