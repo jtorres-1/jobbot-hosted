@@ -13,6 +13,7 @@ from selenium.webdriver.chrome.options import Options
 from pyairtable import Table   # new Airtable client
 from datetime import datetime
 from flask import Flask, request
+import uuid
 
 
 print("[DEBUG] AIRTABLE_TOKEN =", os.getenv("AIRTABLE_TOKEN"))
@@ -277,39 +278,48 @@ def get_jobs():
 
 def apply_to_job(job):
     print(f"[AUTO] Applying → {job['url']}", flush=True)
+
     opts = Options()
-    opts.binary_location = "/usr/bin/chromium"  # <- required on Railway
+    opts.binary_location = "/usr/bin/chromium"
     opts.add_argument("--headless")
     opts.add_argument("--disable-gpu")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument(f"--user-data-dir=/tmp/profile-{uuid.uuid4()}")  # 🔥 THE FIX
+
     driver = webdriver.Chrome(options=opts)
 
     try:
         driver.get(job["url"])
         time.sleep(4)
+
         for inp in driver.find_elements(By.TAG_NAME, "input"):
             name = inp.get_attribute("name") or ""
             if "email" in name.lower():
-                inp.send_keys(USER_DATA.get("email",""))
+                inp.send_keys(USER_DATA.get("email", ""))
             elif "name" in name.lower():
-                inp.send_keys(USER_DATA.get("full_name",""))
+                inp.send_keys(USER_DATA.get("full_name", ""))
             elif "phone" in name.lower():
-                inp.send_keys(USER_DATA.get("phone",""))
+                inp.send_keys(USER_DATA.get("phone", ""))
+
         for f in driver.find_elements(By.CSS_SELECTOR, "input[type='file']"):
             f.send_keys(os.path.abspath(RESUME_PATH))
+
         for btn in driver.find_elements(By.TAG_NAME, "button"):
             t = btn.text.lower()
             if "submit" in t or "apply" in t:
                 btn.click()
                 break
+
         print("[AUTO] Success", flush=True)
+
     except Exception as e:
         print(f"[AUTO ERROR] {e}", flush=True)
-        
+
     finally:
         driver.quit()
-        log_application(job)  # <- 🔥 add this here to force logging to Airtable
+        print("[DEBUG] log_application() triggered in finally", flush=True)
+        log_application(job)
 
 
 def bot_cycle():
