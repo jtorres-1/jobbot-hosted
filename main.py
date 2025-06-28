@@ -110,7 +110,17 @@ def load_applied_urls():
         return {row[3] for row in reader if len(row) >= 4}
 
 def log_application(job):
-    print("[DEBUG] log_application() was called", flush=True)  # << ADD THIS
+    print("[DEBUG] log_application() was called", flush=True)
+
+    # 🔥 Load the latest config dynamically
+    try:
+        with open("config.json") as f:
+            runtime_config = json.load(f)
+    except Exception as e:
+        print("[ERROR] Failed to load config.json:", e, flush=True)
+        return
+
+    user_data = runtime_config.get("user_data", {})
     ts = datetime.utcnow().isoformat()
 
     if airtable is None:
@@ -123,7 +133,7 @@ def log_application(job):
             "Job Title": job["title"],
             "Company": job["company"],
             "URL": job["url"],
-            "Client Email": USER_DATA.get("email", "unknown@example.com")
+            "Client Email": user_data.get("email", "unknown@example.com")
         }, flush=True)
 
         rec = airtable.create({
@@ -131,7 +141,7 @@ def log_application(job):
             "Job Title": job["title"],
             "Company": job["company"],
             "URL": job["url"],
-            "Client Email": USER_DATA.get("email", "unknown@example.com")
+            "Client Email": user_data.get("email", "unknown@example.com")
         })
 
         print(f"[AIRTABLE ✅] Logged as {rec['id']}", flush=True)
@@ -139,6 +149,7 @@ def log_application(job):
 
     except Exception as e:
         print(f"[AIRTABLE ERROR] {e}", flush=True)
+
 
 
 
