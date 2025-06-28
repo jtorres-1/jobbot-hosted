@@ -49,13 +49,14 @@ def receive_tally():
 
         resume_url = data.get("resume_url")  # name this based on your Tally field
 
-        if resume_url:
-           response = requests.get(resume_url)
-           with open("resume.pdf", "wb") as f:
-            f.write(response.content)
-           print("[TALLY] Resume downloaded from form")
-       else:
-           print("[TALLY] No resume URL provided, using default")
+        if resume_url and "localhost" not in resume_url:
+    response = requests.get(resume_url, timeout=20)
+    with open("resume.pdf", "wb") as f:
+        f.write(response.content)
+    print("[TALLY] Resume downloaded from form")
+else:
+    print("[TALLY] Invalid or missing resume URL — using default")
+
 
 
         # Save config
@@ -70,12 +71,6 @@ def receive_tally():
     except Exception as e:
         print("[TALLY ERROR]", str(e))
         return "Error", 500
-
-
-@app.route('/tally', methods=['POST'])
-def handle_tally():
-    print("[TALLY] Webhook hit")
-    ...
 
 
 
