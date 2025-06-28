@@ -106,7 +106,8 @@ def load_applied_urls():
         return {row[3] for row in reader if len(row) >= 4}
 
 def log_application(job):
-    ts = datetime.datetime.utcnow().isoformat()
+    ts = datetime.utcnow().isoformat()
+
 
     if airtable is None:
         print("[ERROR] Airtable client not initialized.")
