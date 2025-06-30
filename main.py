@@ -148,12 +148,16 @@ def log_application(job):
         }
 
         print("[DEBUG] Logging to Airtable with:", payload, flush=True)
+        print(f"[DEBUG] Job passed to logger: {job}", flush=True)
+
 
         rec = airtable.create(payload)
         print(f"[AIRTABLE ✅] Logged as {rec['id']}", flush=True)
 
     except Exception as e:
-        print(f"[AIRTABLE ERROR] {e}", flush=True)
+        print(f"[AIRTABLE ERROR] While logging job → {e}", flush=True)
+        print(f"[AIRTABLE PAYLOAD] {json.dumps(payload, indent=2)}", flush=True)
+
 
 
 
