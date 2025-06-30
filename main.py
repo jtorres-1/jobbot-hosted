@@ -14,6 +14,8 @@ from pyairtable import Table   # new Airtable client
 from datetime import datetime
 from flask import Flask, request
 import uuid
+from selenium.webdriver.chrome.service import Service
+
 
 
 print("[DEBUG] AIRTABLE_TOKEN =", os.getenv("AIRTABLE_TOKEN"))
@@ -302,7 +304,11 @@ def apply_to_job(job):
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument(f"--user-data-dir=/tmp/profile-{uuid.uuid4()}")  # 🔥 THE FIX
 
-    driver = webdriver.Chrome(options=opts)
+    
+
+    chrome_service = Service("/usr/bin/chromedriver")
+    driver = webdriver.Chrome(service=chrome_service, options=opts)
+
 
     try:
         driver.get(job["url"])
