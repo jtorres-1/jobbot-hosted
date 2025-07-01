@@ -14,6 +14,9 @@ from datetime import datetime
 from flask import Flask, request
 import uuid
 from selenium.webdriver.chrome.service import Service
+import smtplib
+from email.message import EmailMessage
+
 
 
 
@@ -323,6 +326,28 @@ def bot_cycle():
     
         applied.add(job["url"])
     print("[BOT] Cycle complete", flush=True)
+    send_email_report(USER_DATA.get("email", ""))
+
+
+def send_email_report(recipient_email):
+    try:
+        print("[EMAIL] Sending CSV to", recipient_email)
+        msg = EmailMessage()
+        msg["Subject"] = "Your JobBot Report – Jobs Applied"
+        msg["From"] = os.getenv("EMAIL_USER")
+        msg["To"] = recipient_email
+        msg.set_content("Here is your job application report. We've successfully applied to jobs on your behalf.")
+
+        with open("applied_jobs.csv", "rb") as f:
+            msg.add_attachment(f.read(), maintype="application", subtype="octet-stream", filename="applied_jobs.csv")
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS"))
+            smtp.send_message(msg)
+        print("[EMAIL ✅] Report sent.")
+    except Exception as e:
+        print("[EMAIL ❌]", str(e))
+
 
 def scheduler():
     bot_cycle()
