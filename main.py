@@ -125,9 +125,10 @@ def log_application(job):
     ts = datetime.utcnow().isoformat()
 
     # 🔥 Fetch env vars dynamically just in case
-    token = os.getenv("AIRTABLE_TOKEN")
-    base_id = os.getenv("AIRTABLE_BASE_ID")
-    table_name = os.getenv("AIRTABLE_TABLE_NAME")
+    token = AIRTABLE_TOKEN
+    base_id = AIRTABLE_BASE_ID
+    table_name = AIRTABLE_TABLE_NAME
+
 
     if not all([token, base_id, table_name]):
         print("[AIRTABLE ERROR] One or more env vars missing at runtime.", flush=True)
