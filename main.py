@@ -341,7 +341,7 @@ def send_email_report(recipient_email):
         with open("applied_jobs.csv", "rb") as f:
             msg.add_attachment(f.read(), maintype="application", subtype="octet-stream", filename="applied_jobs.csv")
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        with smtplib.SMTP_SSL("smtp.mail.yahoo.com", 465) as smtp:
             smtp.login(os.getenv("EMAIL_USER"), os.getenv("EMAIL_PASS"))
             smtp.send_message(msg)
         print("[EMAIL ✅] Report sent.")
