@@ -17,9 +17,6 @@ from selenium.webdriver.chrome.service import Service
 
 
 
-print("[DEBUG] AIRTABLE_TOKEN =", os.getenv("AIRTABLE_TOKEN"))
-print("[DEBUG] AIRTABLE_BASE_ID =", os.getenv("AIRTABLE_BASE_ID"))
-print("[DEBUG] AIRTABLE_TABLE_NAME =", os.getenv("AIRTABLE_TABLE_NAME"))
 
 
 app = Flask(__name__)
