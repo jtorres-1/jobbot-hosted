@@ -10,7 +10,6 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from pyairtable import Table   # new Airtable client
 from datetime import datetime
 from flask import Flask, request
 import uuid
@@ -115,32 +114,20 @@ def log_application(job):
     user_data = runtime_config.get("user_data", {})
     ts = datetime.utcnow().isoformat()
 
-    # Load Airtable env vars at runtime
-    AIRTABLE_TOKEN = os.getenv("AIRTABLE_TOKEN")
-    AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
-    AIRTABLE_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME")
-
-    if not all([AIRTABLE_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME]):
-        print("[AIRTABLE ERROR] Missing env vars", flush=True)
-        return
-
     try:
-        airtable = Table(AIRTABLE_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
-
-        payload = {
-            "Date Applied": ts,
-            "Job Title": job["title"],
-            "Company": job["company"],
-            "URL": job["url"],
-            "Client Email": user_data.get("email", "unknown@example.com")
-        }
-
-        print("[DEBUG] Logging to Airtable with:", payload, flush=True)
-        rec = airtable.create(payload)
-        print(f"[AIRTABLE ✅] Logged as {rec['id']}", flush=True)
+        with open("applied_jobs.csv", mode="a", newline="") as file:
+            writer = csv.writer(file)
+            writer.writerow([
+                ts,
+                job["title"],
+                job["company"],
+                job["url"]
+            ])
+        print("[CSV ✅] Logged to CSV successfully", flush=True)
 
     except Exception as e:
-        print(f"[AIRTABLE ERROR] {e}", flush=True)
+        print(f"[CSV ERROR] {e}", flush=True)
+
 
 
 
