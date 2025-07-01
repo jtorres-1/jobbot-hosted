@@ -88,16 +88,7 @@ RESUME_PATH = config.get("resume_path", "resume.pdf")
 USER_DATA   = config.get("user_data", {})
 CSV_PATH    = "applied_jobs.csv"
 
-# Airtable ENV + client
-AIRTABLE_TOKEN      = os.getenv("AIRTABLE_TOKEN")
-AIRTABLE_BASE_ID    = os.getenv("AIRTABLE_BASE_ID")
-AIRTABLE_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME")
-if AIRTABLE_TOKEN and AIRTABLE_BASE_ID and AIRTABLE_TABLE_NAME:
-    print("[AIRTABLE ✅] ENV vars loaded successfully", flush=True)
-    airtable = Table(AIRTABLE_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
-else:
-    print("[AIRTABLE ❌] Missing one or more ENV vars", flush=True)
-    airtable = None
+
 
 
 
@@ -124,21 +115,17 @@ def log_application(job):
     user_data = runtime_config.get("user_data", {})
     ts = datetime.utcnow().isoformat()
 
-    # 🔥 Fetch env vars dynamically just in case
-    token = AIRTABLE_TOKEN
-    base_id = AIRTABLE_BASE_ID
-    table_name = AIRTABLE_TABLE_NAME
+    # Load Airtable env vars at runtime
+    AIRTABLE_TOKEN = os.getenv("AIRTABLE_TOKEN")
+    AIRTABLE_BASE_ID = os.getenv("AIRTABLE_BASE_ID")
+    AIRTABLE_TABLE_NAME = os.getenv("AIRTABLE_TABLE_NAME")
 
-
-    if not all([token, base_id, table_name]):
-        print("[AIRTABLE ERROR] One or more env vars missing at runtime.", flush=True)
-        print(f"  AIRTABLE_TOKEN = {token}")
-        print(f"  AIRTABLE_BASE_ID = {base_id}")
-        print(f"  AIRTABLE_TABLE_NAME = {table_name}")
+    if not all([AIRTABLE_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME]):
+        print("[AIRTABLE ERROR] Missing env vars", flush=True)
         return
 
     try:
-        airtable = Table(token, base_id, table_name)
+        airtable = Table(AIRTABLE_TOKEN, AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME)
 
         payload = {
             "Date Applied": ts,
@@ -149,20 +136,11 @@ def log_application(job):
         }
 
         print("[DEBUG] Logging to Airtable with:", payload, flush=True)
-        print(f"[DEBUG] Job passed to logger: {job}", flush=True)
-
-
         rec = airtable.create(payload)
         print(f"[AIRTABLE ✅] Logged as {rec['id']}", flush=True)
 
     except Exception as e:
-        print(f"[AIRTABLE ERROR] While logging job → {e}", flush=True)
-        print(f"[AIRTABLE PAYLOAD] {json.dumps(payload, indent=2)}", flush=True)
-
-
-
-
-
+        print(f"[AIRTABLE ERROR] {e}", flush=True)
 
 
 
