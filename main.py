@@ -36,7 +36,6 @@ def receive_tally():
     data = request.json
     print("[TALLY] Webhook hit")
 
-    # Extract values from Tally submission
     try:
         answers = {a['key']: a['value'] for a in data.get("answers", [])}
 
@@ -50,29 +49,33 @@ def receive_tally():
             }
         }
 
-        resume_url = data.get("resume_url")  # name this based on your Tally field
-
+        resume_url = data.get("resume_url")
         if resume_url and "localhost" not in resume_url:
-            response = requests.get(resume_url, timeout=20)
-            with open("resume.pdf", "wb") as f:
-                f.write(response.content)
-            print("[TALLY] Resume downloaded from form")
+            for _ in range(3):
+                try:
+                    response = requests.get(resume_url, timeout=20)
+                    with open("resume.pdf", "wb") as f:
+                        f.write(response.content)
+                    print("[TALLY ✅] Resume downloaded.")
+                    break
+                except Exception as e:
+                    print(f"[TALLY RETRY] Resume download failed: {e}")
         else:
             print("[TALLY] Invalid or missing resume URL — using default")
 
-        # Save config
+        config["timestamp"] = str(datetime.utcnow())
+
         with open("config.json", "w") as f:
             json.dump(config, f, indent=2)
         print("[TALLY] Config updated.")
 
-        # Call bot_cycle directly instead of in a thread
         bot_cycle()
-
         return "Success", 200
 
     except Exception as e:
         print("[TALLY ERROR]", str(e))
         return "Error", 500
+
 
 def get_current_config():
     """Load current config from file"""
@@ -126,6 +129,14 @@ def log_application(job):
 
     except Exception as e:
         print(f"[CSV ERROR] {e}", flush=True)
+
+    with open(CSV_PATH) as f:
+        rows = list(csv.reader(f))
+    if len(rows) > 1000:
+        with open(CSV_PATH, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerows(rows[-1000:])
+
 
 def scrape_remotive():
     config = get_current_config()
@@ -380,6 +391,10 @@ def bot_cycle():
     send_email_report(user_data.get("email", ""))
 
 def send_email_report(recipient_email):
+    if not recipient_email or "@" not in recipient_email:
+        print("[EMAIL SKIP] No valid email")
+        return
+
     try:
         print("[EMAIL] Sending CSV to", recipient_email)
         msg = EmailMessage()
