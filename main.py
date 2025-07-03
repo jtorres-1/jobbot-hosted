@@ -309,6 +309,18 @@ def get_chrome_options():
     
     return opts
 
+def safe_get(driver, url, retries=3, wait=5):
+    for attempt in range(retries):
+        try:
+            driver.get(url)
+            return True
+        except Exception as e:
+            print(f"[SAFE_GET ERROR] Attempt {attempt + 1} failed: {e}", flush=True)
+            time.sleep(wait)
+    print(f"[SAFE_GET FAIL] Failed to load {url} after {retries} tries", flush=True)
+    return False
+
+
 def apply_to_job(job):
     config = get_current_config()
     user_data = config.get("user_data", {})
@@ -340,7 +352,10 @@ def apply_to_job(job):
         return
 
     try:
-        driver.get(job["url"])
+        if not safe_get(driver, job["url"]):
+            driver.quit()
+            return
+
         time.sleep(4)
 
         for inp in driver.find_elements(By.TAG_NAME, "input"):
