@@ -472,6 +472,11 @@ def homepage():
 def download_csv():
     return send_from_directory(".", "applied_jobs.csv", as_attachment=True)
 
+@app.route("/download")
+def download_logs():
+    return send_file("logs.csv", as_attachment=True)
+
+
     
 if __name__ == "__main__":
     th = threading.Thread(target=scheduler, daemon=True)
