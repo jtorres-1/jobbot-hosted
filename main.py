@@ -43,16 +43,19 @@ def receive_tally():
     try:
         answers = {a['key']: a['value'] for a in data.get("answers", [])}
 
-        default_config= {
+        unique_filename = f"resume_{uuid.uuid4().hex}.pdf"
+        resume_path = os.path.join("resumes", unique_filename)
+
+        default_config = {
             "keywords": answers.get("keywords", "").split(","),
-            unique_filename = f"resume_{uuid.uuid4().hex}.pdf"
-            resume_path = os.path.join("resumes", unique_filename),
+            "resume_path": resume_path,
             "user_data": {
                 "email": answers.get("email", ""),
                 "location": answers.get("location", ""),
                 "job_type": answers.get("job_type", "")
-            }
         }
+    }
+
 
         resume_url = data.get("resume_url")
         if resume_url and "localhost" not in resume_url:
@@ -69,6 +72,8 @@ def receive_tally():
             print("[TALLY] Invalid or missing resume URL — using default")
 
         config["timestamp"] = str(datetime.utcnow())
+        config.update(default_config)
+
 
         with open("config.json", "w") as f:
             json.dump(config, f, indent=2)
