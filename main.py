@@ -23,9 +23,7 @@ from flask import send_from_directory, render_template_string
 
 app = Flask(__name__)
 
-@app.route("/")
-def home():
-    return "alive"
+
 
 # Load initial config
 CONFIG_FILE = "config.json"
