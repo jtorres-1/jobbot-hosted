@@ -17,6 +17,8 @@ from selenium.webdriver.chrome.service import Service
 import smtplib
 from email.message import EmailMessage
 from flask import send_file
+from flask import send_from_directory, render_template_string
+
 
 
 app = Flask(__name__)
@@ -454,6 +456,17 @@ def download_log():
     if not os.path.exists("applied_jobs.csv"):
         return "No file to download", 404
     return send_file("applied_jobs.csv", as_attachment=True)
+
+@app.route("/")
+def homepage():
+    with open("index.html") as f:
+        html_content = f.read()
+    return render_template_string(html_content)
+
+@app.route("/applied_jobs.csv")
+def download_csv():
+    return send_from_directory(".", "applied_jobs.csv", as_attachment=True)
+
     
 if __name__ == "__main__":
     th = threading.Thread(target=scheduler, daemon=True)
