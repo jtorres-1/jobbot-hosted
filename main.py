@@ -16,6 +16,8 @@ import uuid
 from selenium.webdriver.chrome.service import Service
 import smtplib
 from email.message import EmailMessage
+from flask import send_file
+
 
 app = Flask(__name__)
 
@@ -434,7 +436,19 @@ def scheduler():
     while True:
         time.sleep(3600)  # Run every hour instead of 30 seconds
         bot_cycle()
+@app.route("/log")
+def view_log():
+    if not os.path.exists("applied_jobs.csv"):
+        return "No log file found.", 404
+    with open("applied_jobs.csv") as f:
+        return "<h2>JobBot Logs</h2><pre>" + f.read().replace("\n", "<br>") + "</pre>"
 
+@app.route("/download-log")
+def download_log():
+    if not os.path.exists("applied_jobs.csv"):
+        return "No file to download", 404
+    return send_file("applied_jobs.csv", as_attachment=True)
+    
 if __name__ == "__main__":
     th = threading.Thread(target=scheduler, daemon=True)
     th.start()
