@@ -41,9 +41,10 @@ def receive_tally():
     try:
         answers = {a['key']: a['value'] for a in data.get("answers", [])}
 
-        config = {
+        default_config= {
             "keywords": answers.get("keywords", "").split(","),
-            "resume_path": "resume.pdf",
+            unique_filename = f"resume_{uuid.uuid4().hex}.pdf"
+            resume_path = os.path.join("resumes", unique_filename),
             "user_data": {
                 "email": answers.get("email", ""),
                 "location": answers.get("location", ""),
@@ -391,7 +392,7 @@ def apply_to_job(job):
 def bot_cycle():
 
     if os.path.exists(CSV_PATH):
-    os.remove(CSV_PATH)
+        os.remove(CSV_PATH)
     print("[CSV] Cleared old log")
 
     applied = load_applied_urls()
