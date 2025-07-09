@@ -389,6 +389,11 @@ def apply_to_job(job):
         log_application(job)
 
 def bot_cycle():
+
+    if os.path.exists(CSV_PATH):
+    os.remove(CSV_PATH)
+    print("[CSV] Cleared old log")
+
     applied = load_applied_urls()
     print(f"[BOT] {len(applied)} URLs loaded", flush=True)
     jobs = get_jobs()
