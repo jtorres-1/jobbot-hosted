@@ -58,35 +58,39 @@ def receive_tally():
 
 
         # ✅ Grab the uploaded resume file from Tally
+        # ✅ Grab the uploaded resume file from Tally
 resume_url = ""
 for answer in data.get("answers", []):
     if answer.get("type") == "file" and answer.get("value"):
         resume_url = answer["value"][0]  # First uploaded file
         break
 
-        if resume_url and "localhost" not in resume_url:
-            for _ in range(3):
-                try:
-                    response = requests.get(resume_url, timeout=20)
-                    with open("resume.pdf", "wb") as f:
-                        f.write(response.content)
-                    print("[TALLY ✅] Resume downloaded.")
-                    break
-                except Exception as e:
-                    print(f"[TALLY RETRY] Resume download failed: {e}")
-        else:
-            print("[TALLY] Invalid or missing resume URL — using default")
+# ✅ Download the resume if URL is valid
+if resume_url and "localhost" not in resume_url:
+    for _ in range(3):
+        try:
+            response = requests.get(resume_url, timeout=20)
+            with open(resume_path, "wb") as f:  # ✅ Use correct path
+                f.write(response.content)
+            print("[TALLY ✅] Resume downloaded.")
+            break
+        except Exception as e:
+            print(f"[TALLY RETRY] Resume download failed: {e}")
+else:
+    print("[TALLY] Invalid or missing resume URL — using default")
 
-        config["timestamp"] = str(datetime.utcnow())
-        config.update(default_config)
+# ✅ Add timestamp and merge user config
+config["timestamp"] = str(datetime.utcnow())
+config.update(default_config)
 
+# ✅ Save config to file
+with open("config.json", "w") as f:
+    json.dump(config, f, indent=2)
+print("[TALLY] Config updated.")
 
-        with open("config.json", "w") as f:
-            json.dump(config, f, indent=2)
-        print("[TALLY] Config updated.")
-
-        bot_cycle()
-        return "Success", 200
+# ✅ Launch job application cycle
+bot_cycle()
+return "Success", 200
 
     except Exception as e:
         print("[TALLY ERROR]", str(e))
