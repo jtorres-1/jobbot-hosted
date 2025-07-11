@@ -52,8 +52,9 @@ def receive_tally():
                 "email": answers.get("email", ""),
                 "location": answers.get("location", ""),
                 "job_type": answers.get("job_type", "")
+            }
         }
-    }
+
 
 
         resume_url = data.get("resume_url")
