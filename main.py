@@ -41,20 +41,22 @@ def receive_tally():
         if not os.path.exists("resumes"):
             os.makedirs("resumes")
 
-        unique_filename = f"resume_{uuid.uuid4().hex}.pdf"
-        resume_path = os.path.join("resumes", unique_filename)
+        # Use standardized resume filename
+        resume_path = os.path.join("resumes", "resume.pdf")
 
         default_config = {
-            "keywords": answers.get("keywords", "").split(","),
+            "keywords": [kw.strip() for kw in answers.get("keywords", "").split(",") if kw.strip()],
             "resume_path": resume_path,
             "user_data": {
                 "email": answers.get("email", ""),
                 "location": answers.get("location", ""),
-                "job_type": answers.get("job_type", "")
+                "job_type": answers.get("job_type", ""),
+                "full_name": answers.get("full_name", ""),
+                "phone": answers.get("phone", "")
             }
         }
 
-        # ✅ Grab the uploaded resume file from Tally
+        # Download the resume file from Tally
         resume_url = ""
         try:
             for answer in data.get("answers", []):
@@ -62,35 +64,37 @@ def receive_tally():
                     resume_url = answer["value"][0]  # First uploaded file
                     break
 
-            # ✅ Download the resume if URL is valid
+            # Download the resume if URL is valid
             if resume_url and "localhost" not in resume_url:
-                for _ in range(3):
+                for attempt in range(3):
                     try:
-                        response = requests.get(resume_url, timeout=20)
-                        response.raise_for_status()  # Raise an exception for bad status codes
-                        with open(resume_path, "wb") as f:  # ✅ Use correct path
+                        response = requests.get(resume_url, timeout=30)
+                        response.raise_for_status()
+                        with open(resume_path, "wb") as f:
                             f.write(response.content)
-                        print("[TALLY ✅] Resume downloaded.")
+                        print(f"[TALLY ✅] Resume downloaded to {resume_path}")
                         break
                     except Exception as e:
-                        print(f"[TALLY RETRY] Resume download failed: {e}")
+                        print(f"[TALLY RETRY] Resume download attempt {attempt + 1} failed: {e}")
+                        if attempt == 2:
+                            print("[TALLY ERROR] Failed to download resume after 3 attempts")
             else:
                 print("[TALLY] Invalid or missing resume URL — using default")
 
         except Exception as e:
             print(f"[TALLY ERROR] Resume handling failed: {e}")
 
-        # ✅ Add timestamp and merge user config
+        # Add timestamp and merge user config
         config["timestamp"] = str(datetime.utcnow())
         config.update(default_config)
 
-        # ✅ Save config to file
+        # Save config to file
         with open("config.json", "w") as f:
             json.dump(config, f, indent=2)
         print("[TALLY] Config updated.")
 
-        # ✅ Launch job application cycle
-        bot_cycle()
+        # Launch job application cycle
+        threading.Thread(target=bot_cycle, daemon=True).start()
         return "Success", 200
 
     except Exception as e:
@@ -161,84 +165,6 @@ def log_application(job):
     except Exception as e:
         print(f"[CSV CLEANUP ERROR] {e}", flush=True)
 
-def scrape_remotive():
-    config = get_current_config()
-    keywords = [kw.lower().strip() for kw in config.get("keywords", []) if kw.strip()]
-    max_results = config.get("max_results", 50)
-    
-    print("[SCRAPE] Remotive...", flush=True)
-    url = "https://remotive.io/remote-jobs/software-dev"
-    jobs = []
-    try:
-        r = requests.get(url, timeout=20)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
-        for tile in soup.select("div.job-tile")[:max_results]:
-            t = tile.select_one(".job-tile-title")
-            l = tile.select_one("a")
-            c = tile.select_one(".job-tile-company")
-            if not (t and l): continue
-            title = t.get_text(strip=True)
-            company = c.get_text(strip=True) if c else "Unknown"
-            href = l["href"]
-            full = href if href.startswith("http") else f"https://remotive.io{href}"
-            text = (title + " " + company + " " + full).lower()
-            if (not keywords or any(kw in text for kw in keywords)) and location_allowed(text):
-                jobs.append({"url": full, "title": title, "company": company})
-    except Exception as e:
-        print(f"[ERROR] Remotive: {e}", flush=True)
-    return jobs
-
-def scrape_remoteok():
-    config = get_current_config()
-    keywords = [kw.lower().strip() for kw in config.get("keywords", []) if kw.strip()]
-    max_results = config.get("max_results", 50)
-    
-    print("[SCRAPE] RemoteOK...", flush=True)
-    url = "https://remoteok.io/remote-dev-jobs"
-    jobs = []
-    try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
-        for row in soup.select("tr.job")[:max_results]:
-            l = row.select_one("a.preventLink")
-            if not l: continue
-            full_url = "https://remoteok.io" + l["href"]
-            title = row.get("data-position", "Remote Job")
-            company = row.get("data-company", "Unknown")
-            text = (title + " " + company + " " + full_url).lower()
-            if (not keywords or any(kw in text for kw in keywords)) and location_allowed(text):
-                jobs.append({"url": full_url, "title": title, "company": company})
-    except Exception as e:
-        print(f"[ERROR] RemoteOK: {e}", flush=True)
-    return jobs
-
-def scrape_weworkremotely():
-    config = get_current_config()
-    keywords = [kw.lower().strip() for kw in config.get("keywords", []) if kw.strip()]
-    max_results = config.get("max_results", 50)
-    
-    print("[SCRAPE] WeWorkRemotely...", flush=True)
-    url = "https://weworkremotely.com/categories/remote-programming-jobs"
-    jobs = []
-    try:
-        r = requests.get(url, timeout=20)
-        r.raise_for_status()
-        soup = BeautifulSoup(r.text, "html.parser")
-        for sec in soup.select("section.jobs li.feature")[:max_results]:
-            l = sec.select_one("a")
-            if not l: continue
-            href = l["href"]
-            full_url = "https://weworkremotely.com" + href
-            title = sec.get_text(strip=True)
-            text = (title + " " + full_url).lower()
-            if (not keywords or any(kw in title.lower() for kw in keywords)) and location_allowed(text):
-                jobs.append({"url": full_url, "title": title, "company": "Unknown"})
-    except Exception as e:
-        print(f"[ERROR] WWR: {e}", flush=True)
-    return jobs
-
 def scrape_jobspresso():
     config = get_current_config()
     keywords = [kw.lower().strip() for kw in config.get("keywords", []) if kw.strip()]
@@ -259,7 +185,7 @@ def scrape_jobspresso():
             company = li.select_one(".company")
             company_name = company.get_text(strip=True) if company else "Unknown"
             text = (title + " " + company_name + " " + href).lower()
-            if (not keywords or any(kw in title.lower() for kw in keywords)) and location_allowed(text):
+            if (not keywords or any(kw in text for kw in keywords)) and location_allowed(text):
                 jobs.append({"url": href, "title": title, "company": company_name})
     except Exception as e:
         print(f"[ERROR] Jobspresso: {e}", flush=True)
@@ -285,10 +211,133 @@ def scrape_remoteco():
             company = row.select_one(".company")
             company_name = company.get_text(strip=True) if company else "Unknown"
             text = (title + " " + company_name + " " + href).lower()
-            if (not keywords or any(kw in title.lower() for kw in keywords)) and location_allowed(text):
+            if (not keywords or any(kw in text for kw in keywords)) and location_allowed(text):
                 jobs.append({"url": href, "title": title, "company": company_name})
     except Exception as e:
         print(f"[ERROR] Remote.co: {e}", flush=True)
+    return jobs
+
+def scrape_weworkremotely():
+    config = get_current_config()
+    keywords = [kw.lower().strip() for kw in config.get("keywords", []) if kw.strip()]
+    max_results = config.get("max_results", 50)
+    
+    print("[SCRAPE] WeWorkRemotely...", flush=True)
+    url = "https://weworkremotely.com/categories/remote-programming-jobs"
+    jobs = []
+    try:
+        r = requests.get(url, timeout=20)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        for sec in soup.select("section.jobs li.feature")[:max_results]:
+            l = sec.select_one("a")
+            if not l: continue
+            href = l["href"]
+            full_url = "https://weworkremotely.com" + href
+            title = sec.get_text(strip=True)
+            company = "Unknown"
+            # Try to extract company from the title
+            if " at " in title:
+                title_parts = title.split(" at ")
+                if len(title_parts) > 1:
+                    company = title_parts[1].strip()
+                    title = title_parts[0].strip()
+            text = (title + " " + company + " " + full_url).lower()
+            if (not keywords or any(kw in text for kw in keywords)) and location_allowed(text):
+                jobs.append({"url": full_url, "title": title, "company": company})
+    except Exception as e:
+        print(f"[ERROR] WWR: {e}", flush=True)
+    return jobs
+
+def scrape_remoteok():
+    config = get_current_config()
+    keywords = [kw.lower().strip() for kw in config.get("keywords", []) if kw.strip()]
+    max_results = config.get("max_results", 50)
+    
+    print("[SCRAPE] RemoteOK...", flush=True)
+    url = "https://remoteok.io/remote-dev-jobs"
+    jobs = []
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        r = requests.get(url, headers=headers, timeout=20)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        for row in soup.select("tr.job")[:max_results]:
+            l = row.select_one("a.preventLink")
+            if not l: continue
+            full_url = "https://remoteok.io" + l["href"]
+            title = row.get("data-position", "Remote Job")
+            company = row.get("data-company", "Unknown")
+            text = (title + " " + company + " " + full_url).lower()
+            if (not keywords or any(kw in text for kw in keywords)) and location_allowed(text):
+                jobs.append({"url": full_url, "title": title, "company": company})
+    except Exception as e:
+        print(f"[ERROR] RemoteOK: {e}", flush=True)
+    return jobs
+
+def scrape_flexjobs():
+    config = get_current_config()
+    keywords = [kw.lower().strip() for kw in config.get("keywords", []) if kw.strip()]
+    max_results = config.get("max_results", 50)
+    
+    print("[SCRAPE] FlexJobs...", flush=True)
+    url = "https://www.flexjobs.com/remote-jobs/developer"
+    jobs = []
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        r = requests.get(url, headers=headers, timeout=20)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        for item in soup.select("div.job")[:max_results]:
+            a = item.select_one("a")
+            if not a: continue
+            href = a["href"]
+            if not href.startswith("http"):
+                href = "https://www.flexjobs.com" + href
+            title = a.get_text(strip=True)
+            company = item.select_one(".company")
+            company_name = company.get_text(strip=True) if company else "Unknown"
+            text = (title + " " + company_name + " " + href).lower()
+            if (not keywords or any(kw in text for kw in keywords)) and location_allowed(text):
+                jobs.append({"url": href, "title": title, "company": company_name})
+    except Exception as e:
+        print(f"[ERROR] FlexJobs: {e}", flush=True)
+    return jobs
+
+def scrape_indeed():
+    config = get_current_config()
+    keywords = [kw.lower().strip() for kw in config.get("keywords", []) if kw.strip()]
+    max_results = config.get("max_results", 50)
+    
+    print("[SCRAPE] Indeed...", flush=True)
+    # Focus on remote software developer jobs
+    url = "https://www.indeed.com/jobs?q=remote+software+developer&l=Remote"
+    jobs = []
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        r = requests.get(url, headers=headers, timeout=20)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        for item in soup.select("div.job_seen_beacon")[:max_results]:
+            a = item.select_one("h2 a")
+            if not a: continue
+            href = a["href"]
+            if not href.startswith("http"):
+                href = "https://www.indeed.com" + href
+            title = a.get_text(strip=True)
+            company = item.select_one("span.companyName")
+            company_name = company.get_text(strip=True) if company else "Unknown"
+            text = (title + " " + company_name + " " + href).lower()
+            if (not keywords or any(kw in text for kw in keywords)) and location_allowed(text):
+                jobs.append({"url": href, "title": title, "company": company_name})
+    except Exception as e:
+        print(f"[ERROR] Indeed: {e}", flush=True)
     return jobs
 
 def get_jobs():
@@ -296,15 +345,23 @@ def get_jobs():
     max_results = config.get("max_results", 50)
     
     all_jobs = []
-    scrapers = [scrape_remotive, scrape_remoteok, scrape_weworkremotely, scrape_jobspresso, scrape_remoteco]
+    scrapers = [
+        scrape_jobspresso,
+        scrape_remoteco,
+        scrape_weworkremotely,
+        scrape_remoteok,
+        scrape_flexjobs,
+        scrape_indeed
+    ]
     
     for fn in scrapers:
         try:
             jobs = fn()
             all_jobs.extend(jobs)
+            print(f"[SCRAPE] {fn.__name__}: {len(jobs)} jobs found", flush=True)
         except Exception as e:
             print(f"[SCRAPE ERROR] {fn.__name__}: {e}", flush=True)
-        time.sleep(3)  # Delay between scrapers to reduce timeout risk
+        time.sleep(2)  # Delay between scrapers
 
     # Remove duplicates
     seen, unique = set(), []
@@ -332,6 +389,7 @@ def get_chrome_options():
     opts.add_argument(f"--user-data-dir=/tmp/profile-{uuid.uuid4()}")
     opts.add_argument("--disable-web-security")
     opts.add_argument("--disable-features=VizDisplayCompositor")
+    opts.add_argument("--remote-debugging-port=9222")
     
     # Try to set binary location if it exists
     possible_paths = ["/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"]
@@ -391,6 +449,7 @@ def apply_to_job(job):
         time.sleep(4)
 
         # Fill out form fields
+        inputs_filled = 0
         for inp in driver.find_elements(By.TAG_NAME, "input"):
             try:
                 name = (inp.get_attribute("name") or "").lower()
@@ -399,27 +458,73 @@ def apply_to_job(job):
                 
                 if input_type == "file":
                     inp.send_keys(os.path.abspath(resume_path))
+                    inputs_filled += 1
+                    print(f"[AUTO] Uploaded resume to file input", flush=True)
                 elif "email" in name or "email" in placeholder:
-                    inp.send_keys(user_data.get("email", ""))
+                    if user_data.get("email"):
+                        inp.clear()
+                        inp.send_keys(user_data["email"])
+                        inputs_filled += 1
                 elif "name" in name or "name" in placeholder:
-                    inp.send_keys(user_data.get("full_name", ""))
+                    if user_data.get("full_name"):
+                        inp.clear()
+                        inp.send_keys(user_data["full_name"])
+                        inputs_filled += 1
                 elif "phone" in name or "phone" in placeholder:
-                    inp.send_keys(user_data.get("phone", ""))
+                    if user_data.get("phone"):
+                        inp.clear()
+                        inp.send_keys(user_data["phone"])
+                        inputs_filled += 1
             except Exception as e:
                 print(f"[AUTO] Input error: {e}", flush=True)
 
+        # Also try textarea fields
+        for textarea in driver.find_elements(By.TAG_NAME, "textarea"):
+            try:
+                name = (textarea.get_attribute("name") or "").lower()
+                placeholder = (textarea.get_attribute("placeholder") or "").lower()
+                
+                if "message" in name or "cover" in name or "letter" in name:
+                    if user_data.get("cover_letter"):
+                        textarea.clear()
+                        textarea.send_keys(user_data["cover_letter"])
+                        inputs_filled += 1
+            except Exception as e:
+                print(f"[AUTO] Textarea error: {e}", flush=True)
+
+        print(f"[AUTO] Filled {inputs_filled} form fields", flush=True)
+
         # Submit form
+        submitted = False
         for btn in driver.find_elements(By.TAG_NAME, "button"):
             try:
                 t = btn.text.lower()
-                if "submit" in t or "apply" in t:
+                if "submit" in t or "apply" in t or "send" in t:
                     btn.click()
+                    submitted = True
+                    print(f"[AUTO] Clicked submit button: {btn.text}", flush=True)
                     break
             except Exception as e:
                 print(f"[AUTO] Button click error: {e}", flush=True)
 
-        time.sleep(2)  # Wait for submission
-        print("[AUTO] Success", flush=True)
+        # If no button worked, try input submit
+        if not submitted:
+            for inp in driver.find_elements(By.TAG_NAME, "input"):
+                try:
+                    input_type = (inp.get_attribute("type") or "").lower()
+                    if input_type == "submit":
+                        inp.click()
+                        submitted = True
+                        print(f"[AUTO] Clicked submit input", flush=True)
+                        break
+                except Exception as e:
+                    print(f"[AUTO] Submit input error: {e}", flush=True)
+
+        time.sleep(3)  # Wait for submission
+        if submitted:
+            print("[AUTO] Success - Form submitted", flush=True)
+        else:
+            print("[AUTO] Warning - No submit button found", flush=True)
 
     except Exception as e:
         print(f"[AUTO ERROR] {e}", flush=True)
@@ -433,7 +538,7 @@ def apply_to_job(job):
 def bot_cycle():
     print("[BOT] Starting cycle", flush=True)
     
-    # Don't clear the CSV file - just load existing applied URLs
+    # Load existing applied URLs
     applied = load_applied_urls()
     print(f"[BOT] {len(applied)} URLs already applied", flush=True)
     
@@ -454,7 +559,7 @@ def bot_cycle():
         new_applications += 1
         
         # Add delay between applications
-        time.sleep(5)
+        time.sleep(8)
     
     print(f"[BOT] Cycle complete - {new_applications} new applications", flush=True)
     send_email_report(user_data.get("email", ""))
@@ -484,7 +589,6 @@ def send_email_report(recipient_email):
         print("[EMAIL ❌]", str(e))
 
 def scheduler():
-    bot_cycle()
     while True:
         time.sleep(3600)  # Run every hour
         bot_cycle()
@@ -535,7 +639,9 @@ if __name__ == "__main__":
     # Create necessary directories
     os.makedirs("resumes", exist_ok=True)
     
+    # Start scheduler in background
     th = threading.Thread(target=scheduler, daemon=True)
     th.start()
     print("[MAIN] Scheduler started", flush=True)
+    
     app.run(host="0.0.0.0", port=3000)
