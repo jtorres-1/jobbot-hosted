@@ -57,7 +57,13 @@ def receive_tally():
 
 
 
-        resume_url = data.get("resume_url")
+        # ✅ Grab the uploaded resume file from Tally
+resume_url = ""
+for answer in data.get("answers", []):
+    if answer.get("type") == "file" and answer.get("value"):
+        resume_url = answer["value"][0]  # First uploaded file
+        break
+
         if resume_url and "localhost" not in resume_url:
             for _ in range(3):
                 try:
