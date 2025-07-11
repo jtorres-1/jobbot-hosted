@@ -33,7 +33,8 @@ try:
 except:
     config = {"keywords": [], "max_results": 50, "resume_path": "resume.pdf", "user_data": {}}
 
-@app.route('/tally', methods=['POST'])
+@app.route('/webhook', methods=['POST'])
+
 def receive_tally():
     data = request.json
     print("[TALLY] Webhook hit")
