@@ -667,66 +667,88 @@ def bot_cycle():
 def receive_tally():
     data = request.json
     logger.info("[TALLY] Webhook hit from Tally.so")
+    logger.debug(f"[TALLY DEBUG] Raw incoming data: {json.dumps(data, indent=2)}")
 
     try:
-        answers = {a['key']: a['value'] for a in data.get("answers", [])}
+        # Tally webhook data structure: answers is a list of dicts.
+        # Each dict has 'key' (the field ID/name) and 'value'.
+        # We need to map these to more readable names and handle potential data types.
+        
+        parsed_answers = {}
+        for item in data.get("answers", []):
+            field_key = item.get("key")
+            field_value = item.get("value")
+            field_type = item.get("type") # Useful for knowing if it's a file, text, etc.
+            
+            logger.debug(f"[TALLY DEBUG] Processing field: key={field_key}, value={field_value}, type={field_type}")
 
-        # Create resumes directory if it doesn't exist
+            if field_key:
+                parsed_answers[field_key] = field_value
+
+        logger.debug(f"[TALLY DEBUG] Parsed answers dictionary: {json.dumps(parsed_answers, indent=2)}")
+
+        # Extract specific fields using .get() for safety
+        # Ensure these 'keys' match the actual 'keys' or 'ids' in your Tally form fields.
+        # For example, if your keywords field in Tally is named 'keywords_input', use that.
+        
+        # Keywords: Expecting a comma-separated string, convert to list
+        keywords_raw = parsed_answers.get("keywords", "") # Assumed Tally field key is 'keywords'
+        new_keywords = [kw.strip() for kw in keywords_raw.split(",") if kw.strip()]
+        logger.info(f"[TALLY] Extracted Keywords: {new_keywords}")
+
+        # Resume URL: Tally file uploads return a list, take the first URL
+        resume_url = ""
+        # Look for a field explicitly named 'resume' or 'resume_file' or similar.
+        # Alternatively, iterate through answers again, checking 'type' == 'file'.
+        for answer_item in data.get("answers", []):
+            if answer_item.get("type") == "file" and answer_item.get("value"):
+                if isinstance(answer_item["value"], list) and answer_item["value"]:
+                    resume_url = answer_item["value"][0]
+                else:
+                    resume_url = answer_item["value"] # Handle single string case
+                logger.info(f"[TALLY] Extracted Resume URL (raw): {resume_url}")
+                break # Assuming only one resume file
+        
+        # Location, Job Type, and other user data
+        new_user_data = {
+            "email": parsed_answers.get("email", ""),         # Assumed Tally field key is 'email'
+            "location": parsed_answers.get("location", ""),   # Assumed Tally field key is 'location'
+            "job_type": parsed_answers.get("job_type", ""),   # Assumed Tally field key is 'job_type'
+            "full_name": parsed_answers.get("full_name", ""), # Assumed Tally field key is 'full_name'
+            "phone": parsed_answers.get("phone", ""),         # Assumed Tally field key is 'phone'
+            "cover_letter": parsed_answers.get("cover_letter", "") # Assumed Tally field key is 'cover_letter'
+        }
+        logger.info(f"[TALLY] Extracted User Data: {new_user_data}")
+
+        # Ensure resumes directory exists
         if not os.path.exists("resumes"):
             os.makedirs("resumes")
+            logger.info("Created 'resumes' directory.")
 
         # Determine the target resume path
         current_resume_path = os.path.join("resumes", "resume.pdf")
 
         # Download the resume file from Tally
-        resume_url = ""
-        try:
-            for answer in data.get("answers", []):
-                if answer.get("type") == "file" and answer.get("value"):
-                    # Tally file uploads return a list, take the first URL
-                    if isinstance(answer["value"], list) and answer["value"]:
-                        resume_url = answer["value"][0]
-                    else:
-                        resume_url = answer["value"] # Handle single string case
-                    break
-
-            if resume_url and "localhost" not in resume_url: # Avoid attempting to download local URLs
-                logger.info(f"Attempting to download resume from: {resume_url}")
-                download_success = False
-                for attempt in range(3):
-                    try:
-                        response = requests.get(resume_url, timeout=30)
-                        response.raise_for_status() # Check for HTTP errors
-                        with open(current_resume_path, "wb") as f:
-                            f.write(response.content)
-                        logger.info(f"[TALLY ✅] Resume downloaded to {current_resume_path}")
-                        download_success = True
-                        break # Exit loop on success
-                    except requests.exceptions.RequestException as e:
-                        logger.warning(f"[TALLY RETRY] Resume download attempt {attempt + 1} failed: {e}")
-                        if attempt == 2:
-                            logger.error("[TALLY ERROR] Failed to download resume after 3 attempts.")
-                if not download_success:
-                    logger.warning(f"[TALLY] Falling back to default resume due to download failure.")
-                    current_resume_path = DEFAULT_RESUME_PATH
-            else:
-                logger.warning(f"[TALLY] No valid resume URL from webhook. Falling back to default resume.")
+        if resume_url and "localhost" not in resume_url: # Avoid attempting to download local URLs
+            logger.info(f"Attempting to download resume from: {resume_url}")
+            download_success = False
+            for attempt in range(3):
+                try:
+                    response = requests.get(resume_url, timeout=30)
+                    response.raise_for_status() # Check for HTTP errors
+                    with open(current_resume_path, "wb") as f:
+                        f.write(response.content)
+                    logger.info(f"[TALLY ✅] Resume downloaded to {current_resume_path}")
+                    download_success = True
+                    break # Exit loop on success
+                except requests.exceptions.RequestException as e:
+                    logger.warning(f"[TALLY RETRY] Resume download attempt {attempt + 1} failed: {e}")
+            if not download_success:
+                logger.warning(f"[TALLY] Falling back to default resume due to download failure.")
                 current_resume_path = DEFAULT_RESUME_PATH
-
-        except Exception as e:
-            logger.error(f"[TALLY ERROR] Resume handling failed during download: {e}. Falling back to default resume.")
+        else:
+            logger.warning(f"[TALLY] No valid resume URL from webhook or URL is local. Falling back to default resume.")
             current_resume_path = DEFAULT_RESUME_PATH
-
-        # Build new config from webhook data
-        new_keywords = [kw.strip() for kw in answers.get("keywords", "").split(",") if kw.strip()]
-        new_user_data = {
-            "email": answers.get("email", ""),
-            "location": answers.get("location", ""),
-            "job_type": answers.get("job_type", ""),
-            "full_name": answers.get("full_name", ""),
-            "phone": answers.get("phone", ""),
-            "cover_letter": answers.get("cover_letter", "") # Assuming you might add a cover letter field in Tally
-        }
 
         # Update global config (or create if not exists)
         global config # Indicate we're modifying the global config
@@ -748,151 +770,109 @@ def receive_tally():
         logger.exception("[TALLY ERROR] An unexpected error occurred in webhook processing.")
         return "Error", 500
 
-@app.route('/applied_jobs')
-def show_applied_jobs():
-    """
-    Displays a table of applied jobs from the CSV_PATH file.
-    """
-    if not os.path.exists(CSV_PATH):
-        return "No jobs applied yet.", 200
+# --- Web Interface Routes ---
 
-    try:
-        with open(CSV_PATH, newline="", encoding='utf-8') as f: # Specify encoding for robustness
-            reader = csv.reader(f)
-            header = next(reader, None)  # Read header row
-            jobs_data = list(reader)     # Read remaining rows
+# Simple HTML template for the UI
+UI_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Application Bot</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; background-color: #f4f4f4; color: #333; }
+        .container { max-width: 800px; margin: 0 auto; background-color: #fff; padding: 2em; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        h1, h2 { color: #0056b3; }
+        pre { background-color: #eee; padding: 1em; border-radius: 4px; overflow-x: auto; }
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            margin-top: 1em;
+            background-color: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+            border: none;
+            cursor: pointer;
+        }
+        .button:hover { background-color: #0056b3; }
+        .job-list { list-style: none; padding: 0; }
+        .job-item { background-color: #e9e9e9; margin-bottom: 0.5em; padding: 1em; border-radius: 4px; }
+        .job-item a { color: #007bff; text-decoration: none; }
+        .job-item a:hover { text-decoration: underline; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Job Application Bot Control Panel</h1>
 
-        if not header:
-            header = ["Timestamp", "Title", "Company", "URL"] # Default header if CSV is empty but exists
+        <h2>Current Configuration</h2>
+        <pre>{{ config_json }}</pre>
 
-        html_table = f"""
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Applied Jobs</title>
-            <style>
-                body {{ font-family: sans-serif; margin: 20px; }}
-                table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
-                th, td {{ border: 1px solid #ddd; padding: 10px; text-align: left; vertical-align: top; }}
-                th {{ background-color: #f2f2f2; font-weight: bold; }}
-                tr:nth-child(even) {{ background-color: #f9f9f9; }}
-                a {{ color: #007bff; text-decoration: none; }}
-                a:hover {{ text-decoration: underline; }}
-                h1 {{ color: #333; }}
-                .button-link {{
-                    display: inline-block;
-                    padding: 10px 15px;
-                    margin-top: 20px;
-                    background-color: #28a745;
-                    color: white;
-                    text-align: center;
-                    border-radius: 5px;
-                    text-decoration: none;
-                    font-weight: bold;
-                }}
-                .button-link:hover {{
-                    background-color: #218838;
-                }}
-            </style>
-        </head>
-        <body>
-            <h1>Applied Jobs</h1>
-            <table>
-                <thead>
-                    <tr>
-                        {"".join(f"<th>{col}</th>" for col in header)}
-                    </tr>
-                </thead>
-                <tbody>
-                    {"".join(f"<tr>{''.join(f'<td><a href=\"{item}\" target=\"_blank\">Link</a>' if col_name.lower() == 'url' and item.startswith('http') else item for item, col_name in zip(row, header))}</tr>" for row in jobs_data)}
-                </tbody>
-            </table>
-            <a href="/download_applied_jobs" class="button-link">Download CSV</a>
-            <p><a href="/">Back to Home</a></p>
-        </body>
-        </html>
-        """
-        return render_template_string(html_table), 200
-    except Exception as e:
-        logger.exception("Error displaying applied_jobs.csv:")
-        return f"Error reading applied_jobs.csv: {e}", 500
+        <h2>Latest Applied Jobs</h2>
+        <pre>{{ applied_jobs_csv }}</pre>
 
-@app.route('/download_applied_jobs')
-def download_applied_jobs():
-    """
-    Allows users to download the applied_jobs.csv file.
-    """
-    if not os.path.exists(CSV_PATH):
-        return "No jobs applied yet to download.", 404
-    try:
-        return send_file(CSV_PATH, as_attachment=True, download_name="applied_jobs.csv", mimetype="text/csv")
-    except Exception as e:
-        logger.exception("Error downloading applied_jobs.csv:")
-        return f"Error downloading file: {e}", 500
+        <form action="/run_bot" method="post">
+            <button type="submit" class="button">Run Bot Now</button>
+        </form>
+        <p>This will start the job search and (attempted) application process based on the current configuration.</p>
+
+        <h2>Tally.so Webhook URL:</h2>
+        <p>Set this URL in your Tally.so form's Webhooks integration settings to receive submissions:</p>
+        <pre>{{ webhook_url }}</pre>
+        <p>Remember to match your Tally form field "Keys" (IDs) to what the webhook expects (e.g., 'keywords', 'location', 'resume', 'email', 'full_name', 'phone', 'cover_letter').</p>
+    </div>
+</body>
+</html>
+"""
 
 @app.route('/')
 def index():
-    """
-    The main landing page for the Job Bot Automation, displaying configuration
-    details and links to other features.
-    """
-    current_config = get_current_config() # Ensure we get the absolute latest config
-    
-    keywords = ", ".join(current_config.get("keywords", []))
-    resume_path = current_config.get("resume_path", "Not set")
-    last_run = current_config.get("timestamp", "Never")
-    
-    return f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Job Bot Automation</title>
-        <style>
-            body {{ font-family: sans-serif; margin: 20px; line-height: 1.6; }}
-            h1 {{ color: #333; }}
-            h2 {{ color: #555; margin-top: 30px; }}
-            p {{ margin-bottom: 10px; }}
-            strong {{ font-weight: bold; }}
-            .link-section a {{
-                display: inline-block;
-                padding: 10px 15px;
-                margin-right: 10px;
-                margin-bottom: 10px;
-                background-color: #007bff;
-                color: white;
-                text-align: center;
-                border-radius: 5px;
-                text-decoration: none;
-                font-weight: bold;
-            }}
-            .link-section a:hover {{
-                background-color: #0056b3;
-            }}
-        </style>
-    </head>
-    <body>
-        <h1>Job Bot Automation Dashboard</h1>
-        <p><strong>Keywords:</strong> {keywords if keywords else "None configured"}</p>
-        <p><strong>Resume Path:</strong> {resume_path}</p>
-        <p><strong>Last Config Update / Bot Run:</strong> {last_run} UTC</p>
-        
-        <div class="link-section">
-            <a href="/applied_jobs">View Applied Jobs</a>
-            <a href="/download_applied_jobs">Download Applied Jobs CSV</a>
-        </div>
-        
-        <h2>How to Update Configuration:</h2>
-        <p>Submit your job preferences and resume via the <a href="YOUR_TALLY_FORM_URL_HERE" target="_blank">Tally.so form</a> connected to this bot's webhook.</p>
-        <p>Ensure the webhook URL in Tally.so points to <code>YOUR_RENDER_APP_URL/webhook</code></p>
-    </body>
-    </html>
-    """
+    current_config = get_current_config()
+    config_json = json.dumps(current_config, indent=2)
 
+    applied_jobs_data = ""
+    if os.path.exists(CSV_PATH):
+        with open(CSV_PATH, 'r') as f:
+            applied_jobs_data = f.read()
+    else:
+        applied_jobs_data = "No applied jobs data available yet."
+
+    # Get the base URL for the webhook
+    # In a production environment, this would be your public domain.
+    # For local testing, it might be localhost or ngrok URL.
+    webhook_base_url = request.url_root.rstrip('/')
+    webhook_url = f"{webhook_base_url}/webhook"
+
+    return render_template_string(
+        UI_HTML,
+        config_json=config_json,
+        applied_jobs_csv=applied_jobs_data,
+        webhook_url=webhook_url
+    )
+
+@app.route('/run_bot', methods=['POST'])
+def run_bot_endpoint():
+    logger.info("[UI] Manual bot run requested via UI.")
+    threading.Thread(target=bot_cycle, daemon=True).start()
+    return "Bot cycle initiated. Check server logs for progress.", 202
+
+@app.route('/download_resume')
+def download_resume():
+    config = get_current_config()
+    resume_path = config.get("resume_path", DEFAULT_RESUME_PATH)
+    if os.path.exists(resume_path):
+        return send_file(resume_path, as_attachment=True, download_name="current_resume.pdf")
+    return "Resume not found.", 404
+
+# --- Main execution ---
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=os.environ.get('FLASK_DEBUG') == '1')
-    logger.info(f"Flask app running on port {port}")
+    # You might want to run this with gunicorn in production
+    # For development, this is fine
+    app.run(host='0.0.0.0', port=5000, debug=True, use_reloader=False) 
+    # use_reloader=False because the bot_cycle runs in a separate thread
+    # and reloader might cause issues.
