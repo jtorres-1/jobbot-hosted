@@ -64,6 +64,7 @@ if not os.path.exists(DEFAULT_RESUME_PATH):
     except Exception as e:
         logger.error(f"Failed to create default resume PDF: {e}")
 
+
 # --- Helper Functions ---
 
 def get_current_config():
@@ -133,14 +134,326 @@ def log_application(job):
     except Exception as e:
         logger.error(f"[CSV CLEANUP ERROR] Failed to clean up CSV: {e}")
 
-# --- Scraper Functions ---
-# Note: For production, consider using a dedicated proxy or a service like Scrapy Cloud
-# for more reliable and scalable scraping, as direct requests can be easily blocked.
+# --- Selenium Setup ---
+
+def get_selenium_driver(chromedriver_path=None):
+    """
+    Initializes a headless Chrome WebDriver with common options for Render.
+    """
+    opts = Options()
+    opts.add_argument("--headless")
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    opts.add_argument("--disable-gpu")
+    opts.add_argument("--window-size=1920,1080")
+    opts.add_argument("--disable-extensions")
+    opts.add_argument("--disable-plugins")
+    opts.add_argument("--incognito") # Use incognito mode to avoid caching/cookies
+    opts.add_argument(f"--user-data-dir=/tmp/chrome-profile-{uuid.uuid4()}")
+    opts.add_argument("--remote-debugging-port=9222")
+    opts.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36") # Fake User-Agent
+
+    # Prioritize environment variables for binary paths
+    chrome_binary_path = os.environ.get('CHROME_BINARY_PATH', '/usr/bin/google-chrome')
+    if os.path.exists(chrome_binary_path):
+        opts.binary_location = chrome_binary_path
+        logger.debug(f"Using Chrome binary at: {chrome_binary_path}")
+    else:
+        logger.warning(f"Chrome binary not found at {chrome_binary_path}. Hoping it's in PATH.")
+
+    driver = None
+    try:
+        if chromedriver_path and os.path.exists(chromedriver_path):
+            service = Service(executable_path=chromedriver_path)
+            driver = webdriver.Chrome(service=service, options=opts)
+            logger.debug(f"Initialized ChromeDriver with service from: {chromedriver_path}")
+        else:
+            # Fallback if chromedriver_path is not provided or doesn't exist (e.g., if chromedriver is in PATH)
+            driver = webdriver.Chrome(options=opts)
+            logger.warning(f"Chromedriver path '{chromedriver_path}' not found or provided. Attempting to use default PATH.")
+    except Exception as e:
+        logger.critical(f"Failed to initialize Chrome driver: {e}")
+        return None
+    return driver
+
+def safe_selenium_get(driver, url, retries=3, wait_time=5):
+    """Safely navigates to a URL with retries using Selenium."""
+    for attempt in range(retries):
+        try:
+            driver.get(url)
+            # Wait for the body element to be present, indicating some content has loaded
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            logger.debug(f"Successfully loaded {url} on attempt {attempt + 1}")
+            return True
+        except Exception as e:
+            logger.warning(f"[Selenium GET Error] Attempt {attempt + 1} failed for {url}: {e}")
+            time.sleep(wait_time)
+    logger.error(f"[Selenium GET Fail] Failed to load {url} after {retries} tries")
+    return False
+
+# --- Scraper Functions (Updated to use Selenium) ---
+
+def scrape_indeed_selenium(keywords, location="United States"):
+    """Scrape Indeed for jobs using Selenium."""
+    jobs = []
+    driver = None
+    try:
+        query = ' '.join(keywords)
+        url = f"https://www.indeed.com/jobs?q={urllib.parse.quote(query)}&l={urllib.parse.quote(location)}"
+        
+        driver = get_selenium_driver(os.environ.get('CHROMEDRIVER_PATH', '/usr/bin/chromedriver'))
+        if not driver:
+            return jobs
+
+        logger.info(f"[SCRAPE] Scraping Indeed for '{query}' in '{location}'...")
+        if not safe_selenium_get(driver, url):
+            logger.warning(f"[SCRAPE] Indeed returned 0 jobs (failed to load page).")
+            return jobs
+
+        # Wait for job cards to be present
+        WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'div.job_seen_beacon')))
+        
+        job_cards = driver.find_elements(By.CSS_SELECTOR, 'div.job_seen_beacon')[:20] # Limit for initial scrape
+        
+        for card in job_cards:
+            try:
+                title_elem = card.find_element(By.CSS_SELECTOR, 'h2.jobTitle a')
+                title = title_elem.text.strip()
+                job_url = title_elem.get_attribute('href')
+                
+                company = card.find_element(By.CSS_SELECTOR, 'span.companyName').text.strip()
+                location_text = card.find_element(By.CSS_SELECTOR, 'div.companyLocation').text.strip()
+                
+                jobs.append({
+                    'title': title,
+                    'company': company,
+                    'location': location_text,
+                    'url': job_url
+                })
+            except Exception as e:
+                logger.debug(f"Error parsing Indeed job card: {e}")
+                continue
+    except Exception as e:
+        logger.error(f"[SCRAPE ERROR] Indeed scraper failed: {e}")
+    finally:
+        if driver:
+            driver.quit()
+    logger.info(f"[SCRAPE] Indeed returned {len(jobs)} jobs.")
+    return jobs
+
+def scrape_glassdoor_selenium(keywords, location="United States"):
+    """Scrape Glassdoor for jobs using Selenium."""
+    jobs = []
+    driver = None
+    try:
+        query = ' '.join(keywords)
+        url = f"https://www.glassdoor.com/Job/jobs.htm?sc.keyword={urllib.parse.quote(query)}&locT=N&locId=1&locKeyword={urllib.parse.quote(location)}"
+        
+        driver = get_selenium_driver(os.environ.get('CHROMEDRIVER_PATH', '/usr/bin/chromedriver'))
+        if not driver:
+            return jobs
+
+        logger.info(f"[SCRAPE] Scraping Glassdoor for '{query}' in '{location}'...")
+        if not safe_selenium_get(driver, url):
+            logger.warning(f"[SCRAPE] Glassdoor returned 0 jobs (failed to load page).")
+            return jobs
+
+        # Wait for job cards to be present
+        WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'li.JobsList_jobListItem__JBBUV')))
+        
+        job_cards = driver.find_elements(By.CSS_SELECTOR, 'li.JobsList_jobListItem__JBBUV')[:20]
+        
+        for card in job_cards:
+            try:
+                title_elem = card.find_element(By.CSS_SELECTOR, 'div.JobCard_jobTitle__ddhI5 a')
+                title = title_elem.text.strip()
+                job_url = title_elem.get_attribute('href')
+                
+                company_elem = card.find_element(By.CSS_SELECTOR, 'div.EmployerProfile_employerName__ZdS7e')
+                company = company_elem.text.strip()
+                
+                location_elem = card.find_element(By.CSS_SELECTOR, 'div.JobCard_location__rCz3N')
+                location_text = location_elem.text.strip()
+                
+                jobs.append({
+                    'title': title,
+                    'company': company,
+                    'location': location_text,
+                    'url': job_url
+                })
+            except Exception as e:
+                logger.debug(f"Error parsing Glassdoor job card: {e}")
+                continue
+    except Exception as e:
+        logger.error(f"[SCRAPE ERROR] Glassdoor scraper failed: {e}")
+    finally:
+        if driver:
+            driver.quit()
+    logger.info(f"[SCRAPE] Glassdoor returned {len(jobs)} jobs.")
+    return jobs
+
+def scrape_monster_selenium(keywords, location="United States"):
+    """Scrape Monster for jobs using Selenium."""
+    jobs = []
+    driver = None
+    try:
+        query = ' '.join(keywords)
+        url = f"https://www.monster.com/jobs/search?q={urllib.parse.quote(query)}&where={urllib.parse.quote(location)}"
+        
+        driver = get_selenium_driver(os.environ.get('CHROMEDRIVER_PATH', '/usr/bin/chromedriver'))
+        if not driver:
+            return jobs
+
+        logger.info(f"[SCRAPE] Scraping Monster for '{query}' in '{location}'...")
+        if not safe_selenium_get(driver, url):
+            logger.warning(f"[SCRAPE] Monster returned 0 jobs (failed to load page).")
+            return jobs
+
+        # Wait for job cards to be present
+        WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'div.flex-col.flex-grow.p-4'))) # Adjust selector as needed
+        
+        job_cards = driver.find_elements(By.CSS_SELECTOR, 'div.flex-col.flex-grow.p-4')[:20]
+        
+        for card in job_cards:
+            try:
+                title_elem = card.find_element(By.CSS_SELECTOR, 'h3.text-lg a') # Adjust selector
+                title = title_elem.text.strip()
+                job_url = title_elem.get_attribute('href')
+                
+                company_elem = card.find_element(By.CSS_SELECTOR, 'div.text-sm.text-gray-500.font-bold') # Adjust selector
+                company = company_elem.text.strip()
+                
+                location_elem = card.find_element(By.CSS_SELECTOR, 'div.text-sm.text-gray-500:not(.font-bold)') # Adjust selector
+                location_text = location_elem.text.strip()
+                
+                jobs.append({
+                    'title': title,
+                    'company': company,
+                    'location': location_text,
+                    'url': job_url
+                })
+            except Exception as e:
+                logger.debug(f"Error parsing Monster job card: {e}")
+                continue
+    except Exception as e:
+        logger.error(f"[SCRAPE ERROR] Monster scraper failed: {e}")
+    finally:
+        if driver:
+            driver.quit()
+    logger.info(f"[SCRAPE] Monster returned {len(jobs)} jobs.")
+    return jobs
+
+def scrape_jobspresso_selenium(keywords):
+    """Scrape Jobspresso for remote developer jobs using Selenium."""
+    jobs = []
+    driver = None
+    try:
+        query = ' '.join(keywords)
+        url = "https://jobspresso.co/remote-developer-jobs/" # Jobspresso often has fixed categories
+        if query: # Add keyword filter if present
+            url = f"https://jobspresso.co/?s={urllib.parse.quote(query)}&post_type=job_listing"
+        
+        driver = get_selenium_driver(os.environ.get('CHROMEDRIVER_PATH', '/usr/bin/chromedriver'))
+        if not driver:
+            return jobs
+
+        logger.info(f"[SCRAPE] Scraping Jobspresso for '{query}'...")
+        if not safe_selenium_get(driver, url):
+            logger.warning(f"[SCRAPE] Jobspresso returned 0 jobs (failed to load page).")
+            return jobs
+
+        # Wait for job listings to be present
+        WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'li.job_listing')))
+        
+        job_listings = driver.find_elements(By.CSS_SELECTOR, 'li.job_listing')[:20]
+        
+        for listing in job_listings:
+            try:
+                title_elem = listing.find_element(By.CSS_SELECTOR, 'h3.job-title a') # Adjust selector
+                title = title_elem.text.strip()
+                job_url = title_elem.get_attribute('href')
+                
+                company_elem = listing.find_element(By.CSS_SELECTOR, 'div.company') # Adjust selector
+                company = company_elem.text.strip()
+                
+                # Jobspresso is inherently remote
+                jobs.append({
+                    'title': title,
+                    'company': company,
+                    'location': 'Remote',
+                    'url': job_url
+                })
+            except Exception as e:
+                logger.debug(f"Error parsing Jobspresso job listing: {e}")
+                continue
+    except Exception as e:
+        logger.error(f"[SCRAPE ERROR] Jobspresso scraper failed: {e}")
+    finally:
+        if driver:
+            driver.quit()
+    logger.info(f"[SCRAPE] Jobspresso returned {len(jobs)} jobs.")
+    return jobs
+
+def scrape_weworkremotely_selenium(keywords):
+    """Scrape WeWorkRemotely for remote programming jobs using Selenium."""
+    jobs = []
+    driver = None
+    try:
+        query = ' '.join(keywords)
+        url = "https://weworkremotely.com/categories/remote-programming-jobs"
+        if query: # WeWorkRemotely has a search, but the category page is a good starting point
+            url = f"https://weworkremotely.com/remote-jobs/search?term={urllib.parse.quote(query)}"
+
+        driver = get_selenium_driver(os.environ.get('CHROMEDRIVER_PATH', '/usr/bin/chromedriver'))
+        if not driver:
+            return jobs
+
+        logger.info(f"[SCRAPE] Scraping WeWorkRemotely for '{query}'...")
+        if not safe_selenium_get(driver, url):
+            logger.warning(f"[SCRAPE] WeWorkRemotely returned 0 jobs (failed to load page).")
+            return jobs
+
+        # Wait for job listings to be present
+        WebDriverWait(driver, 10).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'li.feature')))
+        
+        job_listings = driver.find_elements(By.CSS_SELECTOR, 'li.feature')[:20]
+        
+        for listing in job_listings:
+            try:
+                title_elem = listing.find_element(By.CSS_SELECTOR, 'span.title')
+                title = title_elem.text.strip()
+                
+                company_elem = listing.find_element(By.CSS_SELECTOR, 'span.company')
+                company = company_elem.text.strip()
+                
+                link_elem = listing.find_element(By.CSS_SELECTOR, 'a')
+                job_url = "https://weworkremotely.com" + link_elem.get_attribute('href')
+                
+                # WeWorkRemotely is inherently remote
+                jobs.append({
+                    'title': title,
+                    'company': company,
+                    'location': 'Remote',
+                    'url': job_url
+                })
+            except Exception as e:
+                logger.debug(f"Error parsing WeWorkRemotely job listing: {e}")
+                continue
+    except Exception as e:
+        logger.error(f"[SCRAPE ERROR] WeWorkRemotely scraper failed: {e}")
+    finally:
+        if driver:
+            driver.quit()
+    logger.info(f"[SCRAPE] WeWorkRemotely returned {len(jobs)} jobs.")
+    return jobs
+
+# --- Original requests-based scrapers (kept if not explicitly asked to remove, but now unused in get_jobs) ---
+# Keeping them here for reference, but they are replaced in the get_jobs list.
 
 def _make_request(url, headers=None, timeout=15):
     """Helper to make robust HTTP requests with default User-Agent header."""
     if headers is None:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         session = requests.Session()
         response = session.get(url, headers=headers, timeout=timeout)
@@ -150,254 +463,37 @@ def _make_request(url, headers=None, timeout=15):
         logger.error(f"Request failed for {url}: {e}")
         return None
 
-def scrape_indeed(keywords):
-    """Scrape Indeed for US-based jobs."""
+def scrape_remoteok():
+    config = get_current_config()
+    keywords = [kw.lower().strip() for kw in config.get("keywords", []) if kw.strip()]
+    max_results = config.get("max_results", 50)
+    
+    logger.info("[SCRAPE] RemoteOK...")
+    url = "https://remoteok.io/remote-dev-jobs"
     jobs = []
-    query = ' '.join(keywords)
-    url = f"https://www.indeed.com/jobs?q={urllib.parse.quote(query)}&l=United+States"
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
     
     soup = _make_request(url, headers)
     if not soup:
-        logger.warning(f"[SCRAPE] Indeed returned 0 jobs (request failed).")
+        logger.warning(f"[SCRAPE] RemoteOK returned 0 jobs (request failed).")
         return jobs
 
-    job_cards = soup.find_all('div', class_='job_seen_beacon')[:10] # Limit to 10 for quick scan
-    
-    for card in job_cards:
+    for row in soup.select("tr.job")[:max_results]:
         try:
-            title_elem = card.find('h2', class_='jobTitle')
-            title = title_elem.find('a').text.strip() if title_elem and title_elem.find('a') else 'N/A'
-            
-            company_elem = card.find('span', class_='companyName')
-            company = company_elem.text.strip() if company_elem else 'N/A'
-            
-            location_elem = card.find('div', class_='companyLocation')
-            location = location_elem.text.strip() if location_elem else 'N/A'
-            
-            link_elem = title_elem.find('a') if title_elem else None
-            job_url = f"https://www.indeed.com{link_elem['href']}" if link_elem and link_elem.get('href') else 'N/A'
-            
-            jobs.append({
-                'title': title,
-                'company': company,
-                'location': location,
-                'url': job_url
-            })
+            l = row.select_one("a.preventLink")
+            if not l: continue
+            full_url = "https://remoteok.io" + l["href"]
+            title = row.get("data-position", "Remote Job")
+            company = row.get("data-company", "Unknown")
+            text = (title + " " + company + " " + full_url).lower()
+            if (not keywords or any(kw in text for kw in keywords)) and location_allowed(text):
+                jobs.append({"url": full_url, "title": title, "company": company})
         except Exception as e:
-            logger.warning(f"Error parsing Indeed job card: {e}")
+            logger.warning(f"Error parsing RemoteOK job entry: {e}")
             continue
-    logger.info(f"[SCRAPE] Indeed returned {len(jobs)} jobs.")
-    return jobs
-
-def scrape_glassdoor(keywords):
-    """Scrape Glassdoor for US-based jobs."""
-    jobs = []
-    query = ' '.join(keywords)
-    url = f"https://www.glassdoor.com/Job/jobs.htm?sc.keyword={urllib.parse.quote(query)}&locT=N&locId=1&locKeyword=United%20States"
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    
-    soup = _make_request(url, headers)
-    if not soup:
-        logger.warning(f"[SCRAPE] Glassdoor returned 0 jobs (request failed).")
-        return jobs
-        
-    job_cards = soup.find_all('div', class_='jobContainer')[:10]
-    
-    for card in job_cards:
-        try:
-            title_elem = card.find('a', class_='jobLink')
-            title = title_elem.text.strip() if title_elem else 'N/A'
-            
-            company_elem = card.find('div', class_='employerName')
-            company = company_elem.text.strip() if company_elem else 'N/A'
-            
-            location_elem = card.find('div', class_='loc')
-            location = location_elem.text.strip() if location_elem else 'N/A'
-            
-            job_url = title_elem['href'] if title_elem and title_elem.get('href') else 'N/A'
-            if job_url != 'N/A' and not job_url.startswith('http'):
-                job_url = f"https://www.glassdoor.com{job_url}"
-            
-            jobs.append({
-                'title': title,
-                'company': company,
-                'location': location,
-                'url': job_url
-            })
-        except Exception as e:
-            logger.warning(f"Error parsing Glassdoor job card: {e}")
-            continue
-    logger.info(f"[SCRAPE] Glassdoor returned {len(jobs)} jobs.")
-    return jobs
-
-def scrape_monster(keywords):
-    """Scrape Monster for US-based jobs."""
-    jobs = []
-    query = ' '.join(keywords)
-    url = f"https://www.monster.com/jobs/search?q={urllib.parse.quote(query)}&where=United-States"
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    
-    soup = _make_request(url, headers)
-    if not soup:
-        logger.warning(f"[SCRAPE] Monster returned 0 jobs (request failed).")
-        return jobs
-        
-    job_cards = soup.find_all('div', class_='job-cardstyle__JobCardContainer-sc-1mbmxes-0')[:10]
-    
-    for card in job_cards:
-        try:
-            title_elem = card.find('h3', class_='job-cardstyle__JobTitle-sc-1mbmxes-4')
-            title = title_elem.text.strip() if title_elem else 'N/A'
-            
-            company_elem = card.find('span', class_='job-cardstyle__CompanyName-sc-1mbmxes-8')
-            company = company_elem.text.strip() if company_elem else 'N/A'
-            
-            location_elem = card.find('span', class_='job-cardstyle__JobLocation-sc-1mbmxes-9')
-            location = location_elem.text.strip() if location_elem else 'N/A'
-            
-            link_elem = card.find('a')
-            job_url = link_elem['href'] if link_elem and link_elem.get('href') else 'N/A'
-            if job_url != 'N/A' and not job_url.startswith('http'):
-                job_url = f"https://www.monster.com{job_url}"
-            
-            jobs.append({
-                'title': title,
-                'company': company,
-                'location': location,
-                'url': job_url
-            })
-        except Exception as e:
-            logger.warning(f"Error parsing Monster job card: {e}")
-            continue
-    logger.info(f"[SCRAPE] Monster returned {len(jobs)} jobs.")
-    return jobs
-
-def scrape_ziprecruiter(keywords):
-    """Scrape ZipRecruiter for US-based jobs."""
-    jobs = []
-    query = ' '.join(keywords)
-    url = f"https://www.ziprecruiter.com/jobs-search?search={urllib.parse.quote(query)}&location=United+States"
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    
-    soup = _make_request(url, headers)
-    if not soup:
-        logger.warning(f"[SCRAPE] ZipRecruiter returned 0 jobs (request failed).")
-        return jobs
-        
-    job_cards = soup.find_all('div', class_='job_content')[:10]
-    
-    for card in job_cards:
-        try:
-            title_elem = card.find('h2', class_='job_title')
-            title = title_elem.text.strip() if title_elem else 'N/A'
-            
-            company_elem = card.find('a', class_='company_name')
-            company = company_elem.text.strip() if company_elem else 'N/A'
-            
-            location_elem = card.find('span', class_='location')
-            location = location_elem.text.strip() if location_elem else 'N/A'
-            
-            link_elem = title_elem.find('a') if title_elem else None
-            job_url = link_elem['href'] if link_elem and link_elem.get('href') else 'N/A'
-            if job_url != 'N/A' and not job_url.startswith('http'):
-                job_url = f"https://www.ziprecruiter.com{job_url}"
-            
-            jobs.append({
-                'title': title,
-                'company': company,
-                'location': location,
-                'url': job_url
-            })
-        except Exception as e:
-            logger.warning(f"Error parsing ZipRecruiter job card: {e}")
-            continue
-    logger.info(f"[SCRAPE] ZipRecruiter returned {len(jobs)} jobs.")
-    return jobs
-
-def scrape_careerbuilder(keywords):
-    """Scrape CareerBuilder for US-based jobs."""
-    jobs = []
-    query = ' '.join(keywords)
-    url = f"https://www.careerbuilder.com/jobs?keywords={urllib.parse.quote(query)}&location=United+States"
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    
-    soup = _make_request(url, headers)
-    if not soup:
-        logger.warning(f"[SCRAPE] CareerBuilder returned 0 jobs (request failed).")
-        return jobs
-        
-    job_cards = soup.find_all('div', class_='data-results-content')[:10]
-    
-    for card in job_cards:
-        try:
-            title_elem = card.find('h2', class_='data-results-title')
-            title = title_elem.text.strip() if title_elem else 'N/A'
-            
-            company_elem = card.find('div', class_='data-results-company')
-            company = company_elem.text.strip() if company_elem else 'N/A'
-            
-            location_elem = card.find('div', class_='data-results-location')
-            location = location_elem.text.strip() if location_elem else 'N/A'
-            
-            link_elem = title_elem.find('a') if title_elem else None
-            job_url = link_elem['href'] if link_elem and link_elem.get('href') else 'N/A'
-            if job_url != 'N/A' and not job_url.startswith('http'):
-                job_url = f"https://www.careerbuilder.com{job_url}"
-            
-            jobs.append({
-                'title': title,
-                'company': company,
-                'location': location,
-                'url': job_url
-            })
-        except Exception as e:
-            logger.warning(f"Error parsing CareerBuilder job card: {e}")
-            continue
-    logger.info(f"[SCRAPE] CareerBuilder returned {len(jobs)} jobs.")
-    return jobs
-
-def scrape_simplyhired(keywords):
-    """Scrape SimplyHired for US-based jobs."""
-    jobs = []
-    query = ' '.join(keywords)
-    url = f"https://www.simplyhired.com/search?q={urllib.parse.quote(query)}&l=United+States"
-    headers = {'User-Agent': 'Mozilla/5.0'}
-    
-    soup = _make_request(url, headers)
-    if not soup:
-        logger.warning(f"[SCRAPE] SimplyHired returned 0 jobs (request failed).")
-        return jobs
-        
-    job_cards = soup.find_all('div', class_='SerpJob-jobCard')[:10]
-    
-    for card in job_cards:
-        try:
-            title_elem = card.find('h3', class_='jobposting-title')
-            title = title_elem.text.strip() if title_elem else 'N/A'
-            
-            # SimplyHired sometimes puts company and location in the same span or nearby
-            company_elem = card.find('span', {'data-testid': 'companyName'}) or card.find('span', class_='JobPosting-labelWithIcon')
-            company = company_elem.text.strip() if company_elem else 'N/A'
-            
-            location_elem = card.find('span', {'data-testid': 'location'}) or card.find('span', class_='JobPosting-labelWithIcon')
-            location = location_elem.text.strip() if location_elem else 'N/A'
-            
-            link_elem = title_elem.find('a') if title_elem else None
-            job_url = link_elem['href'] if link_elem and link_elem.get('href') else 'N/A'
-            if job_url != 'N/A' and not job_url.startswith('http'):
-                job_url = f"https://www.simplyhired.com{job_url}"
-            
-            jobs.append({
-                'title': title,
-                'company': company,
-                'location': location,
-                'url': job_url
-            })
-        except Exception as e:
-            logger.warning(f"Error parsing SimplyHired job card: {e}")
-            continue
-    logger.info(f"[SCRAPE] SimplyHired returned {len(jobs)} jobs.")
+    logger.info(f"[SCRAPE] RemoteOK returned {len(jobs)} jobs.")
     return jobs
 
 def scrape_flexjobs():
@@ -408,7 +504,9 @@ def scrape_flexjobs():
     logger.info("[SCRAPE] FlexJobs...")
     url = "https://www.flexjobs.com/remote-jobs/developer"
     jobs = []
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
     
     soup = _make_request(url, headers)
     if not soup:
@@ -434,10 +532,8 @@ def scrape_flexjobs():
     logger.info(f"[SCRAPE] FlexJobs returned {len(jobs)} jobs.")
     return jobs
 
-# --- NEW SCRAPERS ---
-
 def scrape_jobicy(keywords):
-    """Scrape Jobicy for remote jobs."""
+    """Scrape Jobicy for remote jobs using requests (as this was already working)."""
     jobs = []
     query = ' '.join(keywords)
     url = f"https://jobicy.com/jobs?q={urllib.parse.quote(query)}"
@@ -462,7 +558,6 @@ def scrape_jobicy(keywords):
             if job_url != 'N/A' and not job_url.startswith('http'):
                 job_url = f"https://jobicy.com{job_url}"
             
-            # Jobicy tends to be remote, no specific location parsing needed
             jobs.append({
                 'title': title,
                 'company': company,
@@ -470,15 +565,15 @@ def scrape_jobicy(keywords):
                 'url': job_url
             })
         except Exception as e:
-            logger.warning(f"Error parsing Jobicy job card: {e}")
+            logger.debug(f"Error parsing Jobicy job card: {e}")
             continue
     logger.info(f"[SCRAPE] Jobicy returned {len(jobs)} jobs.")
     return jobs
 
 def scrape_wellfound(keywords):
-    """Scrape Wellfound (formerly AngelList) for remote jobs."""
+    """Scrape Wellfound (formerly AngelList) for remote jobs using requests (as this was already working)."""
     jobs = []
-    query = '+'.join(keywords) # Wellfound often uses '+' for spaces
+    query = '+'.join(keywords)
     url = f"https://wellfound.com/jobs?q={urllib.parse.quote(query)}&location=Remote"
     headers = {'User-Agent': 'Mozilla/5.0'}
     
@@ -508,13 +603,13 @@ def scrape_wellfound(keywords):
                 'url': job_url
             })
         except Exception as e:
-            logger.warning(f"Error parsing Wellfound job listing: {e}")
+            logger.debug(f"Error parsing Wellfound job listing: {e}")
             continue
     logger.info(f"[SCRAPE] Wellfound returned {len(jobs)} jobs.")
     return jobs
 
 def scrape_powertofly(keywords):
-    """Scrape PowerToFly for remote jobs."""
+    """Scrape PowerToFly for remote jobs using requests (as this was already working)."""
     jobs = []
     query = '+'.join(keywords)
     url = f"https://powertofly.com/jobs?query={urllib.parse.quote(query)}&is_remote=true"
@@ -546,7 +641,7 @@ def scrape_powertofly(keywords):
                 'url': job_url
             })
         except Exception as e:
-            logger.warning(f"Error parsing PowerToFly job card: {e}")
+            logger.debug(f"Error parsing PowerToFly job card: {e}")
             continue
     logger.info(f"[SCRAPE] PowerToFly returned {len(jobs)} jobs.")
     return jobs
@@ -558,19 +653,25 @@ def get_jobs():
     max_results = config.get("max_results", 50)
     
     all_jobs = []
+    
+    # Define location for location-specific scrapers (can be made dynamic from Tally form)
+    # For now, keeping it hardcoded as "United States" or "Remote" as per the prompt context.
+    location_param = config.get("user_data", {}).get("location", "United States") 
+
     scrapers = [
-        lambda: scrape_indeed(keywords_from_config), 
-        lambda: scrape_glassdoor(keywords_from_config),
-        lambda: scrape_monster(keywords_from_config),
-        lambda: scrape_ziprecruiter(keywords_from_config),
-        lambda: scrape_careerbuilder(keywords_from_config),
-        lambda: scrape_simplyhired(keywords_from_config),
-        lambda: scrape_flexjobs(), # FlexJobs doesn't use keywords directly in its URL structure
-        
-        # New Scrapers
-        lambda: scrape_jobicy(keywords_from_config),
-        lambda: scrape_wellfound(keywords_from_config),
-        lambda: scrape_powertofly(keywords_from_config)
+        # New Selenium-based scrapers
+        lambda: scrape_indeed_selenium(keywords_from_config, location=location_param), 
+        lambda: scrape_glassdoor_selenium(keywords_from_config, location=location_param),
+        lambda: scrape_monster_selenium(keywords_from_config, location=location_param),
+        lambda: scrape_jobspresso_selenium(keywords_from_config), # Jobspresso is remote-focused
+        lambda: scrape_weworkremotely_selenium(keywords_from_config), # WeWorkRemotely is remote-focused
+
+        # Remaining requests-based scrapers (if still desired, otherwise replace with Selenium versions)
+        lambda: scrape_remoteok(), # This uses requests.get(), keep if you still want it
+        lambda: scrape_flexjobs(), # This uses requests.get(), keep if you still want it
+        lambda: scrape_jobicy(keywords_from_config), # This uses requests.get(), keep if you still want it
+        lambda: scrape_wellfound(keywords_from_config), # This uses requests.get(), keep if you still want it
+        lambda: scrape_powertofly(keywords_from_config) # This uses requests.get(), keep if you still want it
     ]
     
     for fn in scrapers:
@@ -579,7 +680,7 @@ def get_jobs():
             all_jobs.extend(jobs)
         except Exception as e:
             logger.error(f"[SCRAPE ERROR] {fn.__name__}: {e}")
-        time.sleep(2)  # Delay between scrapers to be polite
+        time.sleep(2)  # Delay between scrapers to be polite and avoid hammering sites
 
     # Remove duplicates
     seen, unique = set(), []
@@ -593,7 +694,7 @@ def get_jobs():
     logger.info(f"[SCRAPE] Found {len(unique)} unique jobs across all sources.")
     return unique
 
-# --- Selenium Automation Functions ---
+# --- Selenium Automation Functions (Existing, kept as is) ---
 
 def get_chrome_options():
     """
