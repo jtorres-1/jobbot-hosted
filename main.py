@@ -33,13 +33,13 @@ try:
         config = json.load(f)
     logger.info(f"Loaded initial config from {CONFIG_FILE}")
 except FileNotFoundError:
-    config = {"keywords": [], "max_results": 50, "resume_path": "resumes/resume.pdf", "user_data": {}}
+    config = {"keywords": [], "max_results": 50, "resume_path": "resumes/default_resume.pdf", "user_data": {}}
     logger.warning(f"Config file {CONFIG_FILE} not found. Initialized with default config.")
 except json.JSONDecodeError:
-    config = {"keywords": [], "max_results": 50, "resume_path": "resumes/resume.pdf", "user_data": {}}
+    config = {"keywords": [], "max_results": 50, "resume_path": "resumes/default_resume.pdf", "user_data": {}}
     logger.error(f"Error decoding {CONFIG_FILE}. Initialized with default config.")
 except Exception as e:
-    config = {"keywords": [], "max_results": 50, "resume_path": "resumes/resume.pdf", "user_data": {}}
+    config = {"keywords": [], "max_results": 50, "resume_path": "resumes/default_resume.pdf", "user_data": {}}
     logger.error(f"An unexpected error occurred loading config: {e}. Initialized with default config.")
 
 # Path for applied jobs CSV
@@ -50,6 +50,20 @@ if not os.path.exists("resumes"):
     os.makedirs("resumes")
     logger.info("Created 'resumes' directory.")
 
+# Create a dummy default resume if it doesn't exist
+DEFAULT_RESUME_PATH = "resumes/default_resume.pdf"
+if not os.path.exists(DEFAULT_RESUME_PATH):
+    try:
+        from reportlab.pdfgen import canvas
+        c = canvas.Canvas(DEFAULT_RESUME_PATH)
+        c.drawString(100, 750, "This is a default resume. Please upload your own!")
+        c.save()
+        logger.info(f"Created a dummy default resume at {DEFAULT_RESUME_PATH}.")
+    except ImportError:
+        logger.warning(f"reportlab not installed. Please manually create a dummy PDF at {DEFAULT_RESUME_PATH} if you don't upload a resume via Tally.")
+    except Exception as e:
+        logger.error(f"Failed to create default resume PDF: {e}")
+
 # --- Helper Functions ---
 
 def get_current_config():
@@ -59,7 +73,7 @@ def get_current_config():
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError) as e:
         logger.error(f"Failed to load config.json: {e}. Returning default config.")
-        return {"keywords": [], "max_results": 50, "resume_path": "resumes/resume.pdf", "user_data": {}}
+        return {"keywords": [], "max_results": 50, "resume_path": DEFAULT_RESUME_PATH, "user_data": {}}
 
 def location_allowed(text):
     """Placeholder: Add your location filtering logic here"""
@@ -123,8 +137,10 @@ def log_application(job):
 # Note: For production, consider using a dedicated proxy or a service like Scrapy Cloud
 # for more reliable and scalable scraping, as direct requests can be easily blocked.
 
-def _make_request(url, headers, timeout=15):
-    """Helper to make robust HTTP requests."""
+def _make_request(url, headers=None, timeout=15):
+    """Helper to make robust HTTP requests with default User-Agent header."""
+    if headers is None:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
     try:
         session = requests.Session()
         response = session.get(url, headers=headers, timeout=timeout)
@@ -139,12 +155,11 @@ def scrape_indeed(keywords):
     jobs = []
     query = ' '.join(keywords)
     url = f"https://www.indeed.com/jobs?q={urllib.parse.quote(query)}&l=United+States"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     soup = _make_request(url, headers)
     if not soup:
+        logger.warning(f"[SCRAPE] Indeed returned 0 jobs (request failed).")
         return jobs
 
     job_cards = soup.find_all('div', class_='job_seen_beacon')[:10] # Limit to 10 for quick scan
@@ -172,7 +187,7 @@ def scrape_indeed(keywords):
         except Exception as e:
             logger.warning(f"Error parsing Indeed job card: {e}")
             continue
-    logger.info(f"Scraped {len(jobs)} jobs from Indeed.")
+    logger.info(f"[SCRAPE] Indeed returned {len(jobs)} jobs.")
     return jobs
 
 def scrape_glassdoor(keywords):
@@ -180,12 +195,11 @@ def scrape_glassdoor(keywords):
     jobs = []
     query = ' '.join(keywords)
     url = f"https://www.glassdoor.com/Job/jobs.htm?sc.keyword={urllib.parse.quote(query)}&locT=N&locId=1&locKeyword=United%20States"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     soup = _make_request(url, headers)
     if not soup:
+        logger.warning(f"[SCRAPE] Glassdoor returned 0 jobs (request failed).")
         return jobs
         
     job_cards = soup.find_all('div', class_='jobContainer')[:10]
@@ -214,7 +228,7 @@ def scrape_glassdoor(keywords):
         except Exception as e:
             logger.warning(f"Error parsing Glassdoor job card: {e}")
             continue
-    logger.info(f"Scraped {len(jobs)} jobs from Glassdoor.")
+    logger.info(f"[SCRAPE] Glassdoor returned {len(jobs)} jobs.")
     return jobs
 
 def scrape_monster(keywords):
@@ -222,12 +236,11 @@ def scrape_monster(keywords):
     jobs = []
     query = ' '.join(keywords)
     url = f"https://www.monster.com/jobs/search?q={urllib.parse.quote(query)}&where=United-States"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     soup = _make_request(url, headers)
     if not soup:
+        logger.warning(f"[SCRAPE] Monster returned 0 jobs (request failed).")
         return jobs
         
     job_cards = soup.find_all('div', class_='job-cardstyle__JobCardContainer-sc-1mbmxes-0')[:10]
@@ -257,7 +270,7 @@ def scrape_monster(keywords):
         except Exception as e:
             logger.warning(f"Error parsing Monster job card: {e}")
             continue
-    logger.info(f"Scraped {len(jobs)} jobs from Monster.")
+    logger.info(f"[SCRAPE] Monster returned {len(jobs)} jobs.")
     return jobs
 
 def scrape_ziprecruiter(keywords):
@@ -265,12 +278,11 @@ def scrape_ziprecruiter(keywords):
     jobs = []
     query = ' '.join(keywords)
     url = f"https://www.ziprecruiter.com/jobs-search?search={urllib.parse.quote(query)}&location=United+States"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     soup = _make_request(url, headers)
     if not soup:
+        logger.warning(f"[SCRAPE] ZipRecruiter returned 0 jobs (request failed).")
         return jobs
         
     job_cards = soup.find_all('div', class_='job_content')[:10]
@@ -300,7 +312,7 @@ def scrape_ziprecruiter(keywords):
         except Exception as e:
             logger.warning(f"Error parsing ZipRecruiter job card: {e}")
             continue
-    logger.info(f"Scraped {len(jobs)} jobs from ZipRecruiter.")
+    logger.info(f"[SCRAPE] ZipRecruiter returned {len(jobs)} jobs.")
     return jobs
 
 def scrape_careerbuilder(keywords):
@@ -308,12 +320,11 @@ def scrape_careerbuilder(keywords):
     jobs = []
     query = ' '.join(keywords)
     url = f"https://www.careerbuilder.com/jobs?keywords={urllib.parse.quote(query)}&location=United+States"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     soup = _make_request(url, headers)
     if not soup:
+        logger.warning(f"[SCRAPE] CareerBuilder returned 0 jobs (request failed).")
         return jobs
         
     job_cards = soup.find_all('div', class_='data-results-content')[:10]
@@ -343,7 +354,7 @@ def scrape_careerbuilder(keywords):
         except Exception as e:
             logger.warning(f"Error parsing CareerBuilder job card: {e}")
             continue
-    logger.info(f"Scraped {len(jobs)} jobs from CareerBuilder.")
+    logger.info(f"[SCRAPE] CareerBuilder returned {len(jobs)} jobs.")
     return jobs
 
 def scrape_simplyhired(keywords):
@@ -351,12 +362,11 @@ def scrape_simplyhired(keywords):
     jobs = []
     query = ' '.join(keywords)
     url = f"https://www.simplyhired.com/search?q={urllib.parse.quote(query)}&l=United+States"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     soup = _make_request(url, headers)
     if not soup:
+        logger.warning(f"[SCRAPE] SimplyHired returned 0 jobs (request failed).")
         return jobs
         
     job_cards = soup.find_all('div', class_='SerpJob-jobCard')[:10]
@@ -387,144 +397,7 @@ def scrape_simplyhired(keywords):
         except Exception as e:
             logger.warning(f"Error parsing SimplyHired job card: {e}")
             continue
-    logger.info(f"Scraped {len(jobs)} jobs from SimplyHired.")
-    return jobs
-
-def scrape_jobspresso():
-    config = get_current_config()
-    keywords = [kw.lower().strip() for kw in config.get("keywords", []) if kw.strip()]
-    max_results = config.get("max_results", 50)
-    
-    logger.info("[SCRAPE] Jobspresso...")
-    url = "https://jobspresso.co/remote-developer-jobs/"
-    jobs = []
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
-    
-    soup = _make_request(url, headers)
-    if not soup:
-        return jobs
-
-    for li in soup.select("ul.jobs li.job_listing")[:max_results]:
-        try:
-            a = li.select_one("a")
-            if not a: continue
-            href = a["href"]
-            title = a.get("title", "Remote Job")
-            company = li.select_one(".company")
-            company_name = company.get_text(strip=True) if company else "Unknown"
-            text = (title + " " + company_name + " " + href).lower()
-            if (not keywords or any(kw in text for kw in keywords)) and location_allowed(text):
-                jobs.append({"url": href, "title": title, "company": company_name})
-        except Exception as e:
-            logger.warning(f"Error parsing Jobspresso job entry: {e}")
-            continue
-    logger.info(f"Scraped {len(jobs)} jobs from Jobspresso.")
-    return jobs
-
-def scrape_remoteco():
-    config = get_current_config()
-    keywords = [kw.lower().strip() for kw in config.get("keywords", []) if kw.strip()]
-    max_results = config.get("max_results", 50)
-    
-    logger.info("[SCRAPE] Remote.co...")
-    url = "https://remote.co/remote-jobs/developer/"
-    jobs = []
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
-    
-    soup = _make_request(url, headers)
-    if not soup:
-        return jobs
-
-    for row in soup.select("li.job_listing")[:max_results]:
-        try:
-            a = row.select_one("a")
-            if not a: continue
-            href = a["href"]
-            title = a.get("title", "Remote Job")
-            company = row.select_one(".company")
-            company_name = company.get_text(strip=True) if company else "Unknown"
-            text = (title + " " + company_name + " " + href).lower()
-            if (not keywords or any(kw in text for kw in keywords)) and location_allowed(text):
-                jobs.append({"url": href, "title": title, "company": company_name})
-        except Exception as e:
-            logger.warning(f"Error parsing Remote.co job entry: {e}")
-            continue
-    logger.info(f"Scraped {len(jobs)} jobs from Remote.co.")
-    return jobs
-
-def scrape_weworkremotely():
-    config = get_current_config()
-    keywords = [kw.lower().strip() for kw in config.get("keywords", []) if kw.strip()]
-    max_results = config.get("max_results", 50)
-    
-    logger.info("[SCRAPE] WeWorkRemotely...")
-    url = "https://weworkremotely.com/categories/remote-programming-jobs"
-    jobs = []
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
-    
-    soup = _make_request(url, headers)
-    if not soup:
-        return jobs
-
-    for sec in soup.select("section.jobs li.feature")[:max_results]:
-        try:
-            l = sec.select_one("a")
-            if not l: continue
-            href = l["href"]
-            full_url = "https://weworkremotely.com" + href
-            title = sec.get_text(strip=True)
-            company = "Unknown"
-            # Try to extract company from the title
-            if " at " in title:
-                title_parts = title.split(" at ")
-                if len(title_parts) > 1:
-                    company = title_parts[1].strip()
-                    title = title_parts[0].strip()
-            text = (title + " " + company + " " + full_url).lower()
-            if (not keywords or any(kw in text for kw in keywords)) and location_allowed(text):
-                jobs.append({"url": full_url, "title": title, "company": company})
-        except Exception as e:
-            logger.warning(f"Error parsing WeWorkRemotely job entry: {e}")
-            continue
-    logger.info(f"Scraped {len(jobs)} jobs from WeWorkRemotely.")
-    return jobs
-
-def scrape_remoteok():
-    config = get_current_config()
-    keywords = [kw.lower().strip() for kw in config.get("keywords", []) if kw.strip()]
-    max_results = config.get("max_results", 50)
-    
-    logger.info("[SCRAPE] RemoteOK...")
-    url = "https://remoteok.io/remote-dev-jobs"
-    jobs = []
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
-    
-    soup = _make_request(url, headers)
-    if not soup:
-        return jobs
-
-    for row in soup.select("tr.job")[:max_results]:
-        try:
-            l = row.select_one("a.preventLink")
-            if not l: continue
-            full_url = "https://remoteok.io" + l["href"]
-            title = row.get("data-position", "Remote Job")
-            company = row.get("data-company", "Unknown")
-            text = (title + " " + company + " " + full_url).lower()
-            if (not keywords or any(kw in text for kw in keywords)) and location_allowed(text):
-                jobs.append({"url": full_url, "title": title, "company": company})
-        except Exception as e:
-            logger.warning(f"Error parsing RemoteOK job entry: {e}")
-            continue
-    logger.info(f"Scraped {len(jobs)} jobs from RemoteOK.")
+    logger.info(f"[SCRAPE] SimplyHired returned {len(jobs)} jobs.")
     return jobs
 
 def scrape_flexjobs():
@@ -535,12 +408,11 @@ def scrape_flexjobs():
     logger.info("[SCRAPE] FlexJobs...")
     url = "https://www.flexjobs.com/remote-jobs/developer"
     jobs = []
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    }
+    headers = {'User-Agent': 'Mozilla/5.0'}
     
     soup = _make_request(url, headers)
     if not soup:
+        logger.warning(f"[SCRAPE] FlexJobs returned 0 jobs (request failed).")
         return jobs
 
     for item in soup.select("div.job")[:max_results]:
@@ -559,7 +431,124 @@ def scrape_flexjobs():
         except Exception as e:
             logger.warning(f"Error parsing FlexJobs job entry: {e}")
             continue
-    logger.info(f"Scraped {len(jobs)} jobs from FlexJobs.")
+    logger.info(f"[SCRAPE] FlexJobs returned {len(jobs)} jobs.")
+    return jobs
+
+# --- NEW SCRAPERS ---
+
+def scrape_jobicy(keywords):
+    """Scrape Jobicy for remote jobs."""
+    jobs = []
+    query = ' '.join(keywords)
+    url = f"https://jobicy.com/jobs?q={urllib.parse.quote(query)}"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    soup = _make_request(url, headers)
+    if not soup:
+        logger.warning(f"[SCRAPE] Jobicy returned 0 jobs (request failed).")
+        return jobs
+
+    job_cards = soup.find_all('div', class_='job-card') # Adjust selector based on actual Jobicy HTML
+    for card in job_cards:
+        try:
+            title_elem = card.find('h3', class_='job-card__title')
+            title = title_elem.text.strip() if title_elem else 'N/A'
+            
+            company_elem = card.find('span', class_='job-card__company')
+            company = company_elem.text.strip() if company_elem else 'N/A'
+            
+            link_elem = card.find('a', class_='job-card__link') # Assuming a specific link class
+            job_url = link_elem['href'] if link_elem and link_elem.get('href') else 'N/A'
+            if job_url != 'N/A' and not job_url.startswith('http'):
+                job_url = f"https://jobicy.com{job_url}"
+            
+            # Jobicy tends to be remote, no specific location parsing needed
+            jobs.append({
+                'title': title,
+                'company': company,
+                'location': 'Remote', 
+                'url': job_url
+            })
+        except Exception as e:
+            logger.warning(f"Error parsing Jobicy job card: {e}")
+            continue
+    logger.info(f"[SCRAPE] Jobicy returned {len(jobs)} jobs.")
+    return jobs
+
+def scrape_wellfound(keywords):
+    """Scrape Wellfound (formerly AngelList) for remote jobs."""
+    jobs = []
+    query = '+'.join(keywords) # Wellfound often uses '+' for spaces
+    url = f"https://wellfound.com/jobs?q={urllib.parse.quote(query)}&location=Remote"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    soup = _make_request(url, headers)
+    if not soup:
+        logger.warning(f"[SCRAPE] Wellfound returned 0 jobs (request failed).")
+        return jobs
+
+    job_listings = soup.find_all('div', class_='job-listing') # Adjust selector
+    for listing in job_listings:
+        try:
+            title_elem = listing.find('h2', class_='job-title') # Adjust selector
+            title = title_elem.text.strip() if title_elem else 'N/A'
+
+            company_elem = listing.find('div', class_='company-name') # Adjust selector
+            company = company_elem.text.strip() if company_elem else 'N/A'
+
+            link_elem = listing.find('a', class_='job-link') # Adjust selector
+            job_url = link_elem['href'] if link_elem and link_elem.get('href') else 'N/A'
+            if job_url != 'N/A' and not job_url.startswith('http'):
+                job_url = f"https://wellfound.com{job_url}"
+
+            jobs.append({
+                'title': title,
+                'company': company,
+                'location': 'Remote',
+                'url': job_url
+            })
+        except Exception as e:
+            logger.warning(f"Error parsing Wellfound job listing: {e}")
+            continue
+    logger.info(f"[SCRAPE] Wellfound returned {len(jobs)} jobs.")
+    return jobs
+
+def scrape_powertofly(keywords):
+    """Scrape PowerToFly for remote jobs."""
+    jobs = []
+    query = '+'.join(keywords)
+    url = f"https://powertofly.com/jobs?query={urllib.parse.quote(query)}&is_remote=true"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    soup = _make_request(url, headers)
+    if not soup:
+        logger.warning(f"[SCRAPE] PowerToFly returned 0 jobs (request failed).")
+        return jobs
+
+    job_cards = soup.find_all('div', class_='job-card') # Adjust selector
+    for card in job_cards:
+        try:
+            title_elem = card.find('h3', class_='job-card-title') # Adjust selector
+            title = title_elem.text.strip() if title_elem else 'N/A'
+
+            company_elem = card.find('div', class_='job-card-company') # Adjust selector
+            company = company_elem.text.strip() if company_elem else 'N/A'
+
+            link_elem = card.find('a', class_='job-card-link') # Adjust selector
+            job_url = link_elem['href'] if link_elem and link_elem.get('href') else 'N/A'
+            if job_url != 'N/A' and not job_url.startswith('http'):
+                job_url = f"https://powertofly.com{job_url}"
+
+            jobs.append({
+                'title': title,
+                'company': company,
+                'location': 'Remote',
+                'url': job_url
+            })
+        except Exception as e:
+            logger.warning(f"Error parsing PowerToFly job card: {e}")
+            continue
+    logger.info(f"[SCRAPE] PowerToFly returned {len(jobs)} jobs.")
     return jobs
 
 def get_jobs():
@@ -570,24 +559,24 @@ def get_jobs():
     
     all_jobs = []
     scrapers = [
-        scrape_jobspresso,
-        scrape_remoteco,
-        scrape_weworkremotely,
-        scrape_remoteok,
-        scrape_flexjobs,
         lambda: scrape_indeed(keywords_from_config), 
         lambda: scrape_glassdoor(keywords_from_config),
         lambda: scrape_monster(keywords_from_config),
         lambda: scrape_ziprecruiter(keywords_from_config),
         lambda: scrape_careerbuilder(keywords_from_config),
-        lambda: scrape_simplyhired(keywords_from_config)
+        lambda: scrape_simplyhired(keywords_from_config),
+        lambda: scrape_flexjobs(), # FlexJobs doesn't use keywords directly in its URL structure
+        
+        # New Scrapers
+        lambda: scrape_jobicy(keywords_from_config),
+        lambda: scrape_wellfound(keywords_from_config),
+        lambda: scrape_powertofly(keywords_from_config)
     ]
     
     for fn in scrapers:
         try:
             jobs = fn()
             all_jobs.extend(jobs)
-            logger.info(f"[SCRAPE] {fn.__name__}: {len(jobs)} jobs found")
         except Exception as e:
             logger.error(f"[SCRAPE ERROR] {fn.__name__}: {e}")
         time.sleep(2)  # Delay between scrapers to be polite
@@ -655,7 +644,7 @@ def apply_to_job(job):
     """Attempts to apply to a job using Selenium."""
     config = get_current_config()
     user_data = config.get("user_data", {})
-    resume_path = config.get("resume_path", "resumes/resume.pdf") # Default to 'resumes/resume.pdf'
+    resume_path = config.get("resume_path", DEFAULT_RESUME_PATH) # Use the potentially updated resume path
 
     logger.info(f"[AUTO] Attempting to apply to → {job.get('url', 'N/A')}")
 
@@ -764,7 +753,6 @@ def apply_to_job(job):
 
         # --- Submit Form Logic ---
         submitted = False
-        submit_attempts = 0
         
         # Try finding a button by text or specific attributes
         try:
@@ -779,7 +767,6 @@ def apply_to_job(job):
             submit_button.click()
             submitted = True
             logger.info(f"[AUTO] Clicked submit button/input.")
-            submit_attempts += 1
         except Exception as e:
             logger.warning(f"Failed to find and click a generic submit button/input: {e}")
 
@@ -843,9 +830,47 @@ def receive_tally():
         if not os.path.exists("resumes"):
             os.makedirs("resumes")
 
-        # Use standardized resume filename
-        resume_filename = "resume.pdf" # Standard name
-        resume_path = os.path.join("resumes", resume_filename)
+        # Determine the target resume path
+        current_resume_path = os.path.join("resumes", "resume.pdf")
+
+        # Download the resume file from Tally
+        resume_url = ""
+        try:
+            for answer in data.get("answers", []):
+                if answer.get("type") == "file" and answer.get("value"):
+                    # Tally file uploads return a list, take the first URL
+                    if isinstance(answer["value"], list) and answer["value"]:
+                        resume_url = answer["value"][0]
+                    else:
+                        resume_url = answer["value"] # Handle single string case
+                    break
+
+            if resume_url and "localhost" not in resume_url: # Avoid attempting to download local URLs
+                logger.info(f"Attempting to download resume from: {resume_url}")
+                download_success = False
+                for attempt in range(3):
+                    try:
+                        response = requests.get(resume_url, timeout=30)
+                        response.raise_for_status() # Check for HTTP errors
+                        with open(current_resume_path, "wb") as f:
+                            f.write(response.content)
+                        logger.info(f"[TALLY ✅] Resume downloaded to {current_resume_path}")
+                        download_success = True
+                        break # Exit loop on success
+                    except requests.exceptions.RequestException as e:
+                        logger.warning(f"[TALLY RETRY] Resume download attempt {attempt + 1} failed: {e}")
+                        if attempt == 2:
+                            logger.error("[TALLY ERROR] Failed to download resume after 3 attempts.")
+                if not download_success:
+                    logger.warning(f"[TALLY] Falling back to default resume due to download failure.")
+                    current_resume_path = DEFAULT_RESUME_PATH
+            else:
+                logger.warning(f"[TALLY] No valid resume URL from webhook. Falling back to default resume.")
+                current_resume_path = DEFAULT_RESUME_PATH
+
+        except Exception as e:
+            logger.error(f"[TALLY ERROR] Resume handling failed during download: {e}. Falling back to default resume.")
+            current_resume_path = DEFAULT_RESUME_PATH
 
         # Build new config from webhook data
         new_keywords = [kw.strip() for kw in answers.get("keywords", "").split(",") if kw.strip()]
@@ -858,40 +883,11 @@ def receive_tally():
             "cover_letter": answers.get("cover_letter", "") # Assuming you might add a cover letter field in Tally
         }
 
-        # Download the resume file from Tally
-        resume_url = ""
-        try:
-            for answer in data.get("answers", []):
-                if answer.get("type") == "file" and answer.get("value"):
-                    # Tally file uploads return a list, take the first URL
-                    resume_url = answer["value"][0]
-                    break
-
-            if resume_url and "localhost" not in resume_url: # Avoid attempting to download local URLs
-                logger.info(f"Attempting to download resume from: {resume_url}")
-                for attempt in range(3):
-                    try:
-                        response = requests.get(resume_url, timeout=30)
-                        response.raise_for_status() # Check for HTTP errors
-                        with open(resume_path, "wb") as f:
-                            f.write(response.content)
-                        logger.info(f"[TALLY ✅] Resume downloaded to {resume_path}")
-                        break # Exit loop on success
-                    except requests.exceptions.RequestException as e:
-                        logger.warning(f"[TALLY RETRY] Resume download attempt {attempt + 1} failed: {e}")
-                        if attempt == 2:
-                            logger.error("[TALLY ERROR] Failed to download resume after 3 attempts. Bot will use existing or default resume.")
-            else:
-                logger.warning("[TALLY] Invalid or missing resume URL from webhook. Bot will use existing or default resume.")
-
-        except Exception as e:
-            logger.error(f"[TALLY ERROR] Resume handling failed during download: {e}")
-
         # Update global config (or create if not exists)
         global config # Indicate we're modifying the global config
         config["timestamp"] = str(datetime.utcnow())
         config["keywords"] = new_keywords
-        config["resume_path"] = resume_path # Update to the downloaded path
+        config["resume_path"] = current_resume_path # Update to the *chosen* resume path
         config["user_data"] = new_user_data
         
         # Save config to file
